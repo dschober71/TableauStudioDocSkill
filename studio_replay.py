@@ -224,6 +224,7 @@ main{display:grid;grid-template-columns:minmax(380px,40%) 1fr;height:calc(100vh 
 #cap{color:var(--mut);font-size:12px;text-align:center}
 .turn{margin-bottom:26px}.msg{padding:9px 13px;border-radius:12px;margin:6px 0;max-width:94%;white-space:pre-wrap;word-wrap:break-word}
 .user{background:var(--acc);color:#fff;margin-left:auto;border-bottom-right-radius:3px}
+.md{white-space:normal}.md p{margin:0 0 8px}.md p:last-child,.md ul:last-child,.md ol:last-child{margin-bottom:0}.md ul,.md ol{margin:0 0 8px;padding-left:22px}.md li{margin:3px 0}.md code{font:12px ui-monospace,Menlo,monospace;background:#eef2f8;padding:1px 4px;border-radius:4px}
 .say{background:var(--card);border:1px solid var(--line);border-bottom-left-radius:3px}
 .meta,.ctx{font-size:11px;color:var(--mut);margin:0 4px 4px}
 details.group{margin:6px 0;border:1px solid var(--line);border-radius:10px;background:#fff}
@@ -278,6 +279,49 @@ def fmt_tool(ev):
             f'<small>{ev["ts"]:%H:%M:%S}</small></summary><pre>{html.escape(body)}</pre></details>')
 
 
+def md(text):
+    """Minimal, safe markdown for agent replies: paragraphs, **bold**, *italic*, `code`, bullets, numbered lists, headings."""
+    def inline(t):
+        t = html.escape(t)
+        t = re.sub(r"`([^`]+)`", r"<code>\1</code>", t)
+        t = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", t)
+        return re.sub(r"(?<![\w*])\*([^*\n]+)\*(?![\w*])", r"<i>\1</i>", t)
+    out, items, kind = [], [], None
+
+    def flush():
+        nonlocal items, kind
+        if items:
+            out.append(f"<{kind}>" + "".join(f"<li>{i}</li>" for i in items) + f"</{kind}>")
+        items, kind = [], None
+    para = []
+    def flush_para():
+        nonlocal para
+        if para:
+            out.append("<p>" + "<br>".join(para) + "</p>")
+        para = []
+    for line in text.splitlines():
+        b = re.match(r"\s*[-*\u2022]\s+(.*)", line)
+        n = re.match(r"\s*\d+[.)]\s+(.*)", line)
+        h = re.match(r"#{1,6}\s+(.*)", line)
+        if b or n:
+            flush_para()
+            k = "ul" if b else "ol"
+            if kind and kind != k:
+                flush()
+            kind = k
+            items.append(inline((b or n).group(1)))
+        elif items and line.startswith("   ") and line.strip():  # continuation of a list item
+            items[-1] += " " + inline(line.strip())
+        elif not line.strip():
+            flush(); flush_para()
+        elif h:
+            flush(); flush_para(); out.append(f"<p><b>{inline(h.group(1))}</b></p>")
+        else:
+            flush(); para.append(inline(line))
+    flush(); flush_para()
+    return "".join(out)
+
+
 def shot_html(s):
     if not (s["mcp"] or s["screen"]):
         return ""
@@ -304,7 +348,7 @@ def render(turns, title, video_name, whisper, video_start):
         if data:
             body.append(f'<details class="group"><summary>Data &amp; fields used &middot; {len(data)} lookups</summary>'
                         + "".join(fmt_tool(e) for e in data) + "</details>")
-        body += [f'<div class="msg say">{html.escape(e["text"])}</div>' for e in says]
+        body += [f'<div class="msg say md">{md(e["text"])}</div>' for e in says]
         body += [shot_html(s) for s in turn.get("shots", [])]
         if video_start and whisper:
             lo, hi = (t0 - video_start).total_seconds(), (turn["t1"] - video_start).total_seconds()
