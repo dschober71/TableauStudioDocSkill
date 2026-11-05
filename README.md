@@ -11,7 +11,11 @@ reply, and every MCP tool call/result (`apply-worksheet`, `add-field`, `apply-da
 It does **not** contain images. So: transcript = *what happened and when*; video/snapshots = *what it looked like*.
 Joining the two by timestamp is the whole trick.
 
-## Pipeline
+## As a Claude skill
+Open Claude Code in this folder and say "start the demo watchdog" (or `/studio-demo-doc`). Do the demo in Studio, then say "stop and build":
+you get `packages/<name>/index.html` (+ zip) from the agent chat and all captured screenshots. See `.claude/skills/studio-demo-doc/SKILL.md`.
+
+## Pipeline (manual)
 1. **Record** the screen (OBS is installed) plus mic. Note the wall-clock start (UTC). Tip: say
    "start" while clapping the first prompt in; or use the file's creation time.
 2. **Transcribe** narration: `whisper rec.mp4 --output_format json` (whisper is installed).

@@ -1,7 +1,6 @@
 __pycache__/
 *.pyc
 .DS_Store
-.claude/
 
 # Demo outputs (large, machine-specific)
 snaps/
@@ -12,3 +11,4 @@ out/
 *.mov
 *.mkv
 rec*.json
+packages/

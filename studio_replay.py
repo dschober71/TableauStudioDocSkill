@@ -10,7 +10,7 @@ Sources combined:
 
 Usage:
   studio_replay.py --list
-  studio_replay.py --session <id|path> --out demo_pkg [--video rec.mp4 --video-start 2026-11-04T15:18:00Z]
+  studio_replay.py --session <id|path|auto> --out demo_pkg [--video rec.mp4 --video-start 2026-11-04T15:18:00Z]
                    [--whisper rec.json] [--snapshots snaps/] [--title "..."]
 """
 import argparse, bisect, html, json, re, shutil, subprocess, sys
@@ -140,8 +140,27 @@ def load_manifest(folder):
     return sorted(out, key=lambda r: r["ts"])
 
 
+def session_from_manifest(folder):
+    """--session auto: the Studio session the watchdog saw most often (falls back to the newest session)."""
+    mf = Path(folder) / "manifest.jsonl"
+    ids = [json.loads(l).get("session") for l in mf.open()] if mf.exists() else []
+    ids = [i for i in ids if i]
+    if not ids:
+        print("manifest names no session - using the newest Studio session")
+        return find_sessions()[0]
+    best = max(set(ids), key=ids.count)
+    if len(set(ids)) > 1:
+        print(f"note: snapshots span {len(set(ids))} sessions {sorted(set(i[:8] for i in ids))}; using {best[:8]}")
+    return resolve_session(best)
+
+
 def build(args):
-    session = resolve_session(args.session)
+    if args.session == "auto":
+        if not args.snapshots:
+            sys.exit("--session auto needs --snapshots")
+        session = session_from_manifest(args.snapshots)
+    else:
+        session = resolve_session(args.session)
     turns = parse_session(session)
     out = Path(args.out)
     (out / "assets").mkdir(parents=True, exist_ok=True)
@@ -157,8 +176,9 @@ def build(args):
         turn["shots"] = []
         if manifest:  # watchdog snapshots: everything captured between this prompt and the next one
             end = turns[ti + 1]["t0"] if ti + 1 < len(turns) else datetime.max.replace(tzinfo=timezone.utc)
+            start = datetime.min.replace(tzinfo=timezone.utc) if ti == 0 else turn["t0"]  # first turn also gets the "before" baseline
             for m in manifest:
-                if turn["t0"] <= m["ts"] < end:
+                if start <= m["ts"] < end:
                     shot = {"ts": m["ts"], "trigger": m["trigger"], "sheet": m["sheet"], "mcp": None, "screen": None,
                             "video_sec": (m["ts"].timestamp() - video_start.timestamp()) if video_start else None}
                     for key in ("mcp", "screen"):
@@ -183,6 +203,9 @@ def build(args):
     page = render(turns, args.title or session.stem, video.name if video else None, whisper, video_start)
     (out / "index.html").write_text(page)
     print(f"{len(turns)} turns, {n} snapshots -> {out/'index.html'}")
+    if args.zip:
+        z = shutil.make_archive(str(out), "zip", out.parent, out.name)
+        print(f"zip -> {z}")
 
 
 # ----------------------------------------------------------------------------------------- HTML
@@ -301,6 +324,7 @@ def main():
     ap.add_argument("--session"), ap.add_argument("--out", default="demo_pkg")
     ap.add_argument("--video"), ap.add_argument("--video-start"), ap.add_argument("--whisper")
     ap.add_argument("--snapshots"), ap.add_argument("--title")
+    ap.add_argument("--zip", action="store_true", help="also write <out>.zip for sharing")
     ap.add_argument("--log-dir", help="folder with Studio session *.jsonl (default: auto-detect)")
     a = ap.parse_args()
     global LOG_DIR
