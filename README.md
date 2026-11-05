@@ -1,85 +1,93 @@
-# Documenting Tableau Studio demos
+# Tableau Studio Demo Documenter
 
-## Key finding
-Tableau Studio's agent (`TableauAgent`) is Claude-based and writes a **timestamped session
-transcript** for every conversation:
+Turn a Tableau Studio agent demo into **one shareable HTML page**: the full agent chat, every step it took, and screenshots
+of what it looked like - no manual screenshots, no video editing.
 
-    ~/.claude/projects/-Users-<you>-Library-Application-Support-Tableau-Tableau-WorkspaceExtensionApplications-TableauAgent-versions-<ver>/<session-id>.jsonl
+**Example:** open [`examples/wildlife-strikes-demo/index.html`](examples/wildlife-strikes-demo/index.html) in a browser
+(a real run: 9 prompts, 10 captures).
 
-It contains every prompt (with a `<live-tableau-context>` header: workbook + active sheet), every
-reply, and every MCP tool call/result (`apply-worksheet`, `add-field`, `apply-dashboard`...).
-It does **not** contain images. So: transcript = *what happened and when*; video/snapshots = *what it looked like*.
-Joining the two by timestamp is the whole trick.
+## What you get
+- Chat on the left; scrolling swaps the screenshot on the right. Agent chatter between steps is muted, the final answer to each prompt is highlighted.
+- Per prompt: an **Analyzed** dropdown (every tool call with input and result; workbook-changing ones in green) and a **Data & fields used** dropdown.
+- Screenshots in two flavors: the **sheet** exported through the Tableau MCP (clean, full resolution) and the **Studio window** (agent pane, chat, selections).
+  A header toggle switches **Both / Sheet / Studio window** (key `t` cycles; remembered).
+- **Edit mode**: tick prompts, steps, chatter, screenshots; delete them (undo available); save a cleaned page.
+- Optional: your screen recording and Whisper narration, synced to the chat.
 
-## As a Claude skill
-Open Claude Code in this folder and say "start the demo watchdog" (or `/studio-demo-doc`). Do the demo in Studio, then say "stop and build":
-you get `packages/<name>/index.html` (+ zip) from the agent chat and all captured screenshots. See `.claude/skills/studio-demo-doc/SKILL.md`.
+## How it works
+Studio's agent (`TableauAgent`) is Claude-based and writes a timestamped transcript of every session
+(`~/.claude/projects/...TableauAgent-versions-<ver>/<session-id>.jsonl`): prompts, replies, every MCP tool call and result - but no images.
+A small background **watchdog** takes the pictures; `studio_replay.py` joins both by timestamp. The watchdog is a plain script, no LLM,
+so it costs nothing while it runs.
 
-## Example
-A real run (Wildlife Strikes, 9 prompts, 10 captures): open `examples/wildlife-strikes-demo/index.html` in a browser
-(local user paths in the transcript are replaced by `/Users/USER`). Try the Both / Sheet / Studio window toggle in the header.
+## Requirements
+- macOS with Tableau Studio / Desktop (the build that bundles `TableauAgent` and `tableau-mcp-desktop`)
+- Python 3.10+ and `pip install -r requirements.txt` (the `mcp` package)
+- Screen Recording permission for the app you launch the watchdog from (Terminal, iTerm, VS Code, Claude...)
+- For the skill: [Claude Code](https://claude.com/claude-code) opened in this folder
+- Optional: OBS (video), `whisper` and `ffmpeg` (narration, frame cutting)
+
+## Quick start (as a Claude skill)
+In Claude Code, in this folder:
+
+1. **"start the demo watchdog"** (or `/studio-demo-doc`). It checks permissions and the Tableau window, then watches in the background.
+2. Run your demo in Studio.
+3. **"stop and build"** -> `packages/<name>/index.html` and a `.zip`, opened in your browser.
+4. Optional **clean-up**: in the page click **Edit**, tick what to remove, **Delete selected**, **Save cleaned HTML**; then say
+   **"apply the cleaned HTML"** (the skill looks for `~/Downloads/index.cleaned.html`) to update the package and zip.
+
+The skill is [`.claude/skills/studio-demo-doc/SKILL.md`](.claude/skills/studio-demo-doc/SKILL.md).
+
+## Quick start (command line)
+```bash
+python3 snapshot_watchdog.py --out snaps --check     # permissions + Tableau window + test shot
+python3 snapshot_watchdog.py --out snaps/demo1       # run during the demo, Ctrl-C afterwards
+python3 studio_replay.py --session auto --snapshots snaps/demo1 --out packages/demo1 --title "My demo" --zip
+open packages/demo1/index.html
+```
+`python3 studio_replay.py --list` shows recent sessions. With video: add `--video rec.mp4 --video-start 2026-11-05T15:18:00Z`
+(UTC time the recording began) and `--whisper rec.json` (from `whisper rec.mp4 --output_format json`).
+
+## When screenshots are taken
+| Trigger | When |
+|---|---|
+| `baseline` | once, at start |
+| `task-done` | the agent ends a turn and Tableau is IDLE |
+| `progress` | every `--progress` s (default 6) while the agent works, so in-between steps show up |
+| `sheet-change` | tab switch or new / renamed / removed view, by agent or user (checked every `--watch` s, default 3); new views that are not active are exported too |
+| `user-change` | the window changed while the agent is idle (e.g. the user clicked a filter); `--no-pixel-watch` turns it off |
+| `change` | after each workbook-changing tool call (only with `--on-change`) |
+
+Mid-task, the MCP export runs only if Tableau is idle at that moment; otherwise the last known sheet image is reused. Identical images are stored once.
+The watchdog uses its own read-only MCP connection (`run-tableau-desktop-mcp.sh`), so it needs no extra setup.
 
 ## Cleaning up after the build
-Open the page, click **Edit** (top right): every prompt, step, chatter block, answer, screenshot and narration line gets a checkbox.
-Tick what to remove, **Delete selected** (Undo is available), then **Save cleaned HTML** (downloads `index.cleaned.html`; the header's prompt count is updated). Apply it to the package:
-
-    python3 studio_prune.py packages/<name> --html ~/Downloads/index.cleaned.html --zip
-
+Open the page, click **Edit**, tick parts, **Delete selected**, **Save cleaned HTML** (downloads `index.cleaned.html` to your browser's download folder). Then:
+```bash
+python3 studio_prune.py packages/<name> --html ~/Downloads/index.cleaned.html --zip
+```
 This replaces `index.html` (the old one is kept as `index.original.html`, never zipped), deletes screenshots nothing references any more and rewrites the zip.
 
-## When frames are taken
-`task-done` (agent ends a turn, after Tableau is IDLE), `progress` (every `--progress` s, default 6, while the agent works on a prompt;
-MCP export only if Tableau is idle at that moment, otherwise the last known sheet image is reused), `sheet-change` (tab switch or
-new/renamed/removed view, polled every `--watch` s; views created alongside but not active are exported too), `user-change`
-(window changed while the agent is idle, stable for one tick; `--no-pixel-watch` turns it off). Identical images are stored once.
-The HTML has a **Both / Sheet / Studio window** toggle in the header (key `t` cycles; remembered).
+## Files
+| File | Purpose |
+|---|---|
+| `snapshot_watchdog.py` | background capture (window shot + MCP export) |
+| `studio_replay.py` | builds the HTML package from session log + snapshots (+ video, narration) |
+| `studio_prune.py` | applies a cleaned page to the package |
+| `studio_logs.py` | finds the Studio session log (`--log-dir` / `$STUDIO_LOG_DIR`, running `TableauAgent` process, folder names, content sniffing; honors `$CLAUDE_CONFIG_DIR`) |
+| `macperms.py` | Screen Recording check and window lookup (stdlib only) |
+| `run-tableau-desktop-mcp.sh`, `.mcp.json` | launch / register the bundled `tableau-desktop` MCP server |
+| `sample/`, `examples/` | fake-data test page and a real example run |
 
-## Pipeline (manual)
-1. **Record** the screen (OBS is installed) plus mic. Note the wall-clock start (UTC). Tip: say
-   "start" while clapping the first prompt in; or use the file's creation time.
-2. **Transcribe** narration: `whisper rec.mp4 --output_format json` (whisper is installed).
-3. **Build**:
-   `python3 studio_replay.py --session <id> --video rec.mp4 --video-start 2026-11-04T15:18:00Z --whisper rec.json --out my_demo`
-4. Open `my_demo/index.html`: chat on the left, scrolling swaps the visual on the right; click a
-   screenshot to seek the video; spoken narration appears inline (amber).
+## Good to know
+- **Privacy:** transcripts and screenshots can contain customer or workbook data. Review the page (use Edit to remove parts) before sharing it.
+- **Thinking is not available:** the agent log stores only encrypted or empty thinking blocks; the tool-call trail is the visible reasoning.
+- **Window not found:** if Studio is minimized or on another Space, shots fall back to the whole screen and the watchdog says so.
+- **Several sessions:** `--session auto` uses the session seen most often in the snapshots and tells you if there were others.
+- **Permission:** if `--check` says Screen Recording is not granted, run `--grant`, enable the app in System Settings, **restart that app**, re-check.
 
-Frames are cut `SETTLE_SECONDS` (2s) after each workbook-changing tool call finishes
-(`apply-*`, `add-field`, `bind-template`, ...), so you get one picture per actual change, not per second.
-
-`python3 studio_replay.py --list` shows recent sessions.
-
-## Watchdog (recommended): capture on "task done", no LLM involved
-`python3 snapshot_watchdog.py --out snaps/` before the demo, Ctrl-C afterwards. A plain script (a skill would burn
-tokens polling) that checks the session log once a second (a cheap file read). When the agent ends a turn
-(`stop_reason: end_turn`) it waits until `get-desktop-state` says IDLE (+1.5s), then captures:
-- **MCP export** of the *active* sheet, using the right tool for its type (worksheet / dashboard / storyboard,
-  from `get-workbook-inventory`) - so single vizzes work, not just dashboards
-- **Screen shot** of the Tableau window (the agent pane, chat, selections), via `screencapture`
-Both go to `snaps/manifest.jsonl`; `--on-change` additionally captures after each workbook-changing tool call.
-It uses its own MCP connection, read-only, only while Studio is idle.
-Replay: `studio_replay.py --session <id> --snapshots snaps/ [--video ... --whisper ...]`.
-
-## Finding the log on other machines (`studio_logs.py`)
-Order: `--log-dir` / `$STUDIO_LOG_DIR` -> the running `TableauAgent` process (cwd -> Claude project folder name)
--> project folders named like TableauAgent/tab-agent -> any recent `.jsonl` containing `<live-tableau-context>`.
-Honors `$CLAUDE_CONFIG_DIR`. The script prints how it found the log. Only the first two strategies were tested here.
-
-## In the HTML
-Per prompt: a "Analyzed" dropdown (every tool call with input/result, workbook-changing ones green) and a
-"Data & fields used" dropdown (field searches, summary data, queries). **Thinking is not available:** the agent log
-stores only encrypted/empty thinking blocks, so the tool-call trail is the visible reasoning.
-
-## Status / caveats
-- Tested: log discovery, MCP export of the active dashboard through the watchdog's own connection, replay build with
-  fake snapshots (`sample/`), JS syntax. **Not tested:** a full live task-done trigger, a real video, opening the page in a browser.
-- **Screenshot permission:** run `python3 snapshot_watchdog.py --out snaps --check` first. It reports whether Screen Recording is granted
-  to the app you launched it from (Terminal, iTerm, VS Code, Claude...), finds the Tableau window and takes a test shot. If not granted,
-  `--grant` triggers the macOS prompt and opens the Settings pane; enable the app, **restart that app**, re-run `--check`.
-  The Studio window is captured by window id (`macperms.py`, stdlib only), so it works even when other windows cover it and needs no
-  Accessibility permission. If Studio isn't found it falls back to the whole screen and says so.
-- Next: crop helper, clock-sync helper, per-turn workbook XML diff, zip/share packaging.
-
-The dashboard-agent (Tableau Cloud) exporter lives in `/Users/dschober/Claude/TableauAgentDocumenter`.
-
-## MCP configuration
-`.mcp.json` registers the `tableau-desktop` server via `run-tableau-desktop-mcp.sh` (picks the newest bundled `tableau-mcp-desktop` under `~/Library/Application Support/Tableau/Tableau/WorkspaceExtensionApplications/TableauAgent/versions`, stdio, `TABLEAU_EXTERNAL_API=true`). The watchdog launches the same script itself over stdio, so it needs no extra setup; the `.mcp.json` is only for using the tools from Claude Code in this folder.
+## Status
+Tested live: log discovery, task-done and sheet captures with both screenshot types, build, toggle, markdown rendering, Edit mode in a browser,
+pruning. Newer and only lightly tested: mid-task `progress` frames, `user-change` detection and extra-view export on long demos;
+log discovery beyond the first two strategies.
+Ideas: crop helper, clock-sync helper, per-turn workbook XML diff, direct-save from the page.

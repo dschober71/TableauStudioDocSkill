@@ -36,7 +36,7 @@ Read the background task output once (not repeatedly) and report the capture lin
 
 ## clean up (after build)
 The user can open the page, click **Edit**, tick prompts/steps/chatter/shots, Delete selected, **Save cleaned HTML** (-> `~/Downloads/index.cleaned.html`).
-Then: `python3 studio_prune.py packages/<name> --html ~/Downloads/index.cleaned.html --zip` (backs up `index.original.html`, drops unused assets, re-zips). Report removed files and the new zip.
+If the user says "apply the cleaned HTML": use the path they give, else `~/Downloads/index.cleaned.html` (if several `index.cleaned*.html` exist or the package is unclear, ask; default package = newest under `packages/`). Then: `python3 studio_prune.py packages/<name> --html ~/Downloads/index.cleaned.html --zip` (backs up `index.original.html`, drops unused assets, re-zips). Report removed files and the new zip.
 
 ## Notes
 - Captures: baseline, `progress` (every few seconds while the agent works), `sheet-change` (tab switch / new view, by agent or user; new non-active views are exported as extras), `user-change` (visible change while the agent is idle), `task-done`.
