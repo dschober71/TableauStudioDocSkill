@@ -15,6 +15,10 @@ Joining the two by timestamp is the whole trick.
 Open Claude Code in this folder and say "start the demo watchdog" (or `/studio-demo-doc`). Do the demo in Studio, then say "stop and build":
 you get `packages/<name>/index.html` (+ zip) from the agent chat and all captured screenshots. See `.claude/skills/studio-demo-doc/SKILL.md`.
 
+## Example
+A real run (Wildlife Strikes, 9 prompts, 10 captures): open `examples/wildlife-strikes-demo/index.html` in a browser
+(local user paths in the transcript are replaced by `/Users/USER`). Try the Both / Sheet / Studio window toggle in the header.
+
 ## When frames are taken
 `task-done` (agent ends a turn, after Tableau is IDLE), `progress` (every `--progress` s, default 6, while the agent works on a prompt;
 MCP export only if Tableau is idle at that moment, otherwise the last known sheet image is reused), `sheet-change` (tab switch or
