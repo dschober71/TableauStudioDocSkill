@@ -90,4 +90,4 @@ This replaces `index.html` (the old one is kept as `index.original.html`, never 
 Tested live: log discovery, task-done and sheet captures with both screenshot types, build, toggle, markdown rendering, Edit mode in a browser,
 pruning. Newer and only lightly tested: mid-task `progress` frames, `user-change` detection and extra-view export on long demos;
 log discovery beyond the first two strategies.
-Ideas: crop helper, clock-sync helper, per-turn workbook XML diff, direct-save from the page.
+Ideas: smarter frame de-duplication (keep a mid-task frame only if the sheet export or view list changed, or the window changed beyond a small tolerance with the chat pane masked; collapse runs of identical frames in the replay), crop helper, clock-sync helper, per-turn workbook XML diff, direct-save from the page.
