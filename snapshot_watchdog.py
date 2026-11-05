@@ -14,7 +14,7 @@ compete with the agent's MCP calls. Needs: pip mcp; Screen Recording permission 
   snapshot_watchdog.py --out snaps/            # run before the demo, Ctrl-C afterwards
   snapshot_watchdog.py --out snaps/ --on-change  # also capture after each workbook-changing tool call
 """
-import argparse, asyncio, json, re, subprocess, time
+import argparse, asyncio, base64, json, re, subprocess, time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -96,8 +96,23 @@ class Watchdog:
             if active:
                 tool, key = EXPORT_TOOL.get(active.get("type", "WORKSHEET"), EXPORT_TOOL["WORKSHEET"])
                 img = self.out / f"{stamp}_mcp.png"
-                await mcp.call_tool(tool, {key: active["name"], "filePath": str(img)})
-                rec.update(sheet=active["name"], sheet_type=active.get("type"), mcp_img=img.name if img.exists() else None)
+                rec.update(sheet=active["name"], sheet_type=active.get("type"))
+                err = None
+                for args in ({key: active["name"], "filePath": str(img)}, {key: active["name"]}):  # to file, then inline
+                    res = await mcp.call_tool(tool, args)
+                    if res.isError:
+                        err = text_of(res)[:200] or "tool error"
+                        continue
+                    for c in res.content:  # inline mode returns the image as base64
+                        if getattr(c, "type", "") == "image":
+                            img.write_bytes(base64.b64decode(c.data))
+                    if img.exists():
+                        err = None
+                        break
+                rec["mcp_img"] = img.name if img.exists() else None
+                if not rec["mcp_img"]:
+                    rec["mcp_error"] = err or "export produced no image"
+                    print(f"  ! MCP export failed for '{active['name']}': {rec['mcp_error']}")
         except Exception as e:  # never let a capture error kill the watchdog
             rec["error"] = repr(e)[:200]
         with (self.out / "manifest.jsonl").open("a") as f:
