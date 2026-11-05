@@ -19,6 +19,14 @@ you get `packages/<name>/index.html` (+ zip) from the agent chat and all capture
 A real run (Wildlife Strikes, 9 prompts, 10 captures): open `examples/wildlife-strikes-demo/index.html` in a browser
 (local user paths in the transcript are replaced by `/Users/USER`). Try the Both / Sheet / Studio window toggle in the header.
 
+## Cleaning up after the build
+Open the page, click **Edit** (top right): every prompt, step, chatter block, answer, screenshot and narration line gets a checkbox.
+Tick what to remove, **Delete selected** (Undo is available), then **Save cleaned HTML** (downloads `index.cleaned.html`; the header's prompt count is updated). Apply it to the package:
+
+    python3 studio_prune.py packages/<name> --html ~/Downloads/index.cleaned.html --zip
+
+This replaces `index.html` (the old one is kept as `index.original.html`, never zipped), deletes screenshots nothing references any more and rewrites the zip.
+
 ## When frames are taken
 `task-done` (agent ends a turn, after Tableau is IDLE), `progress` (every `--progress` s, default 6, while the agent works on a prompt;
 MCP export only if Tableau is idle at that moment, otherwise the last known sheet image is reused), `sheet-change` (tab switch or

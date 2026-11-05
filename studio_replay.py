@@ -223,6 +223,17 @@ header h1{font-size:17px;margin:0}header span{opacity:.7;font-size:12px}
 #mode{margin-left:auto;display:flex;border:1px solid #ffffff55;border-radius:8px;overflow:hidden;align-self:center}
 #mode button{background:none;border:0;color:#fff;opacity:.7;padding:4px 12px;font:12px inherit;cursor:pointer}#mode button.on{background:#ffffff30;opacity:1;font-weight:600}
 .shot.progress{border-left:4px solid #c9d3e3}.shot.sheet-change{border-left:4px solid #2e9e5b}.shot.user-change{border-left:4px solid #f0a800}
+.turn,details.tool,details.group,.msg,.shot,.voice{position:relative}
+.sel{display:none;position:absolute;top:5px;right:7px;z-index:3;width:17px;height:17px;cursor:pointer;accent-color:#d93025}
+.turn>.sel{right:auto;left:-4px;top:-8px;width:19px;height:19px}.shot>.sel{background:#fff}
+body.edit .sel{display:block}body.edit .picked{outline:2px solid #d93025;outline-offset:1px;background-image:linear-gradient(#d9302512,#d9302512)}
+body.edit .shot:hover{border-color:transparent}.del{display:none!important}
+#edit{background:none;border:1px solid #ffffff55;color:#fff;border-radius:8px;padding:4px 12px;font:12px inherit;cursor:pointer;opacity:.8}
+body.edit #edit{background:#d93025;border-color:#d93025;opacity:1}
+#bar{display:none;position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:9;background:#10233d;color:#fff;border-radius:12px;
+ padding:8px 12px;gap:8px;align-items:center;box-shadow:0 6px 24px #0006;font-size:13px}body.edit #bar{display:flex}
+#bar button{background:#ffffff22;border:0;color:#fff;border-radius:8px;padding:5px 12px;font:12px inherit;cursor:pointer}
+#bar button:disabled{opacity:.35;cursor:default}#bar #del:not(:disabled){background:#d93025}#bar #save{background:#0b6fd6}
 body.m-mcp .shot img.screen,body.m-screen .shot img.mcp{display:none}
 #extras{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}#extras figure{margin:0;max-width:30%;text-align:center}
 #extras img{max-width:100%;border-radius:6px;box-shadow:0 1px 8px #0003;background:#fff}#extras figcaption{font-size:11px;color:var(--mut)}
@@ -265,13 +276,31 @@ function show(el){cur=el;shots.forEach(i=>i.classList.toggle('on',i===el));box.i
   if(mode!=='screen')JSON.parse(el.dataset.extras||'[]').forEach(x=>{const f=document.createElement('figure');
     f.innerHTML='<img src="assets/'+x.i+'"><figcaption>New view: '+x.n+'</figcaption>';ex.appendChild(f)});
   cap.textContent=el.dataset.cap.replace(/&middot;/g,'\u00b7')}
-function setMode(m){mode=m;localStorage.setItem('studioMode',m);document.body.className='m-'+m;
+function setMode(m){mode=m;localStorage.setItem('studioMode',m);document.body.classList.remove('m-both','m-mcp','m-screen');document.body.classList.add('m-'+m);
   document.querySelectorAll('#mode button').forEach(b=>b.classList.toggle('on',b.dataset.m===m));if(cur)show(cur)}
 document.querySelectorAll('#mode button').forEach(b=>b.addEventListener('click',()=>setMode(b.dataset.m)));
 document.addEventListener('keydown',e=>{if(e.key==='t'&&!e.metaKey&&!e.ctrlKey){setMode({both:'mcp',mcp:'screen',screen:'both'}[mode])}});
 shots.forEach(i=>i.addEventListener('click',()=>{show(i);if(vid&&i.dataset.t)vid.currentTime=+i.dataset.t}));
 const io=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting)show(e.target)})},{root:document.getElementById('chat'),rootMargin:'-35% 0px -55% 0px'});
-shots.forEach(i=>io.observe(i));setMode(mode);if(shots[0])show(shots[0]);
+shots.forEach(i=>io.observe(i));
+// ---- edit mode: select parts of the log, delete (undo-able), save a cleaned copy of this page
+const bar={cnt:document.getElementById('cnt'),del:document.getElementById('del'),undo:document.getElementById('undo')},hist=[];
+const items=[...document.querySelectorAll('.turn,details.tool,details.group,.chatter,.say,.shot,.voice')];
+function upd(){const n=document.querySelectorAll('.picked').length;bar.cnt.textContent=n+' selected';bar.del.disabled=!n;bar.undo.disabled=!hist.length}
+items.forEach(el=>{const c=document.createElement('input');c.type='checkbox';c.className='sel';c.title='select';
+  c.addEventListener('click',e=>e.stopPropagation());c.addEventListener('change',()=>{el.classList.toggle('picked',c.checked);upd()});el.prepend(c)});
+function clearPicks(){document.querySelectorAll('.picked').forEach(e=>{e.classList.remove('picked');e.querySelector(':scope>.sel').checked=false})}
+document.getElementById('edit').addEventListener('click',()=>{document.body.classList.toggle('edit');if(!document.body.classList.contains('edit'))clearPicks();upd()});
+document.getElementById('done').addEventListener('click',()=>{document.body.classList.remove('edit');clearPicks();upd()});
+bar.del.addEventListener('click',()=>{const ps=[...document.querySelectorAll('.picked')];ps.forEach(e=>e.classList.add('del'));hist.push(ps);clearPicks();upd()});
+bar.undo.addEventListener('click',()=>{(hist.pop()||[]).forEach(e=>e.classList.remove('del'));upd()});
+document.getElementById('save').addEventListener('click',()=>{const d=document.documentElement.cloneNode(true);
+  d.querySelectorAll('.del,.sel').forEach(e=>e.remove());d.querySelectorAll('.picked,.on').forEach(e=>e.classList.remove('picked','on'));
+  d.querySelector('body').className='';const n=d.querySelectorAll('.turn').length,sp=d.querySelector('header span');
+  if(sp)sp.textContent=n+' prompts \u00b7 replay of a Tableau Studio session';
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['<!doctype html>'+d.outerHTML],{type:'text/html'}));
+  a.download='index.cleaned.html';a.click()});
+setMode(mode);if(shots[0])show(shots[0]);
 document.querySelectorAll('.voice[data-t]').forEach(v=>v.addEventListener('click',()=>{if(vid)vid.currentTime=+v.dataset.t}));
 """
 
@@ -396,9 +425,13 @@ def render(turns, title, video_name, whisper, video_start):
     return (f"<!doctype html><meta charset=utf-8><title>{html.escape(title)}</title><style>{CSS}</style>"
             f'<header><h1>{html.escape(title)}</h1><span>{len(turns)} prompts &middot; replay of a Tableau Studio session</span>'
             f'<div id="mode" role="group" aria-label="Screenshot view"><button data-m="both">Both</button>'
-            f'<button data-m="mcp">Sheet</button><button data-m="screen">Studio window</button></div></header>'
+            f'<button data-m="mcp">Sheet</button><button data-m="screen">Studio window</button></div>'
+            f'<button id="edit" title="select parts of the log and delete them">Edit</button></header>'
             f'<main><div id="chat">{"".join(parts)}</div><div id="stage"><div id="imgs"></div>'
-            f'<div id="extras"></div><div id="cap"></div>{vid}</div></main><script>{JS}</script>')
+            f'<div id="extras"></div><div id="cap"></div>{vid}</div></main>'
+            f'<div id="bar"><span id="cnt">0 selected</span><button id="del" disabled>Delete selected</button>'
+            f'<button id="undo" disabled>Undo</button><button id="save">Save cleaned HTML</button><button id="done">Done</button></div>'
+            f'<script>{JS}</script>')
 
 
 def main():

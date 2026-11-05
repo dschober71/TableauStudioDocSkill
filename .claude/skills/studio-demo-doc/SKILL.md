@@ -34,6 +34,10 @@ Read the background task output once (not repeatedly) and report the capture lin
    If the output notes that snapshots span several sessions, tell the user which session was used.
 4. `open packages/<name>/index.html`, then report: turns, snapshot count, zip path. Mention any capture lines that fell back to whole-screen shots or had `error`.
 
+## clean up (after build)
+The user can open the page, click **Edit**, tick prompts/steps/chatter/shots, Delete selected, **Save cleaned HTML** (-> `~/Downloads/index.cleaned.html`).
+Then: `python3 studio_prune.py packages/<name> --html ~/Downloads/index.cleaned.html --zip` (backs up `index.original.html`, drops unused assets, re-zips). Report removed files and the new zip.
+
 ## Notes
 - Captures: baseline, `progress` (every few seconds while the agent works), `sheet-change` (tab switch / new view, by agent or user; new non-active views are exported as extras), `user-change` (visible change while the agent is idle), `task-done`.
 - The HTML has a Both / Sheet / Studio window toggle (also key `t`); the choice is remembered.

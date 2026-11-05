@@ -12,3 +12,4 @@ out/
 *.mkv
 rec*.json
 packages/
+.claude/launch.json
