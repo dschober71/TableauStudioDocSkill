@@ -17,7 +17,7 @@ Pick the mode from the user's words: **start**, **status**, or **stop/build**. I
    - Remove `snaps/check.png` afterwards.
 2. Pick the capture folder: `snaps/<YYYYMMDD-HHMM>-<short-topic>` (ask nothing; derive topic from the user's words or use `demo`).
 3. Start in the background (Bash with `run_in_background: true`):
-   `python3 -u snapshot_watchdog.py --out <folder>` (add `--on-change` only if the user wants a frame per workbook change).
+   `python3 -u snapshot_watchdog.py --out <folder>` (optional: `--progress <sec>` frame interval while the agent works, default 6; `--watch <sec>` tab/view-change check, default 3; `--no-pixel-watch` to ignore non-tab user changes; `--on-change` for a frame after every workbook-changing tool call).
 4. Tell the user in 2 lines: it is watching, run the demo in Studio, say "stop and build" when done. Remember the folder and the background task id.
    Optional: if they will record video, offer `date -u +%Y-%m-%dT%H:%M:%SZ` as the clock reference at recording start.
 
@@ -35,6 +35,8 @@ Read the background task output once (not repeatedly) and report the capture lin
 4. `open packages/<name>/index.html`, then report: turns, snapshot count, zip path. Mention any capture lines that fell back to whole-screen shots or had `error`.
 
 ## Notes
+- Captures: baseline, `progress` (every few seconds while the agent works), `sheet-change` (tab switch / new view, by agent or user; new non-active views are exported as extras), `user-change` (visible change while the agent is idle), `task-done`.
+- The HTML has a Both / Sheet / Studio window toggle (also key `t`); the choice is remembered.
 - Package = `packages/<name>/index.html` + `assets/` (+ `.zip`). Chat left, screenshots right; "Analyzed" and "Data & fields used" dropdowns hold the tool-call trail. Thinking is not recorded by the agent.
 - The baseline shot (before the first prompt) is attached to the first turn.
 - Sessions: `python3 studio_replay.py --list`. To rebuild from another session pass `--session <id>`.

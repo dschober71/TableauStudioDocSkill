@@ -136,7 +136,8 @@ def load_manifest(folder):
         for line in mf.open():
             r = json.loads(line)
             out.append({"ts": ts(r["ts"]), "mcp": r.get("mcp_img"), "screen": r.get("screen_img"),
-                        "sheet": r.get("sheet"), "trigger": r.get("trigger"), "dir": Path(folder)})
+                        "sheet": r.get("sheet"), "trigger": r.get("trigger"), "detail": r.get("detail", ""),
+                        "extras": r.get("extras") or [], "dir": Path(folder)})
     return sorted(out, key=lambda r: r["ts"])
 
 
@@ -180,11 +181,16 @@ def build(args):
             for m in manifest:
                 if start <= m["ts"] < end:
                     shot = {"ts": m["ts"], "trigger": m["trigger"], "sheet": m["sheet"], "mcp": None, "screen": None,
+                            "detail": m["detail"], "extras": [],
                             "video_sec": (m["ts"].timestamp() - video_start.timestamp()) if video_start else None}
                     for key in ("mcp", "screen"):
                         if m[key] and (m["dir"] / m[key]).exists():
                             shutil.copy(m["dir"] / m[key], out / "assets" / m[key])
                             shot[key] = m[key]
+                    for x in m["extras"]:
+                        if (m["dir"] / x["img"]).exists():
+                            shutil.copy(m["dir"] / x["img"], out / "assets" / x["img"])
+                            shot["extras"].append(x)
                     turn["shots"].append(shot)
                     n += 1
         elif video:  # fallback: cut frames from the recording after each workbook-changing tool call
@@ -214,6 +220,12 @@ CSS = """
 *{box-sizing:border-box}body{margin:0;font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink)}
 header{padding:14px 24px;background:#10233d;color:#fff;display:flex;gap:16px;align-items:baseline}
 header h1{font-size:17px;margin:0}header span{opacity:.7;font-size:12px}
+#mode{margin-left:auto;display:flex;border:1px solid #ffffff55;border-radius:8px;overflow:hidden;align-self:center}
+#mode button{background:none;border:0;color:#fff;opacity:.7;padding:4px 12px;font:12px inherit;cursor:pointer}#mode button.on{background:#ffffff30;opacity:1;font-weight:600}
+.shot.progress{border-left:4px solid #c9d3e3}.shot.sheet-change{border-left:4px solid #2e9e5b}.shot.user-change{border-left:4px solid #f0a800}
+body.m-mcp .shot img.screen,body.m-screen .shot img.mcp{display:none}
+#extras{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}#extras figure{margin:0;max-width:30%;text-align:center}
+#extras img{max-width:100%;border-radius:6px;box-shadow:0 1px 8px #0003;background:#fff}#extras figcaption{font-size:11px;color:var(--mut)}
 main{display:grid;grid-template-columns:minmax(380px,40%) 1fr;height:calc(100vh - 50px)}
 #chat{overflow-y:auto;padding:18px 20px;scroll-behavior:smooth}
 #stage{padding:14px;display:flex;flex-direction:column;gap:8px;border-left:1px solid var(--line);background:#e9edf3;overflow:auto}
@@ -239,13 +251,24 @@ details.group[open]>summary{border-bottom:1px solid var(--line)}
 .voice{border-left:3px solid #f0a800;padding:3px 10px;color:#5a4300;background:#fff8e1;font-style:italic;margin:4px 0;font-size:13px}
 """
 JS = """
-const shots=[...document.querySelectorAll('.shot')],box=document.getElementById('imgs'),cap=document.getElementById('cap'),vid=document.getElementById('vid');
-function show(el){shots.forEach(i=>i.classList.toggle('on',i===el));box.innerHTML='';
-  [['mcp','Viz export (MCP)'],['screen','Studio screen']].forEach(([k,l])=>{if(el.dataset[k]){const f=document.createElement('figure');
-    f.innerHTML='<img src="assets/'+el.dataset[k]+'"><figcaption>'+l+'</figcaption>';box.appendChild(f)}});cap.textContent=el.dataset.cap}
+const shots=[...document.querySelectorAll('.shot')],box=document.getElementById('imgs'),cap=document.getElementById('cap'),vid=document.getElementById('vid'),ex=document.getElementById('extras');
+let mode=localStorage.getItem('studioMode')||'both',cur=null;
+function show(el){cur=el;shots.forEach(i=>i.classList.toggle('on',i===el));box.innerHTML='';ex.innerHTML='';
+  const kinds=[['mcp','Sheet (MCP export)'],['screen','Studio window']].filter(([k])=>mode==='both'||mode===k);
+  let any=false;kinds.forEach(([k,l])=>{if(el.dataset[k]){any=true;const f=document.createElement('figure');
+    f.innerHTML='<img src="assets/'+el.dataset[k]+'"><figcaption>'+l+'</figcaption>';box.appendChild(f)}});
+  if(!any){const k=el.dataset.mcp?'mcp':'screen',f=document.createElement('figure');   // chosen view missing: show the other one
+    f.innerHTML='<img src="assets/'+el.dataset[k]+'"><figcaption>'+(k==='mcp'?'Sheet (MCP export)':'Studio window')+' (no '+(mode==='mcp'?'sheet export':'window shot')+' for this frame)</figcaption>';box.appendChild(f)}
+  if(mode!=='screen')JSON.parse(el.dataset.extras||'[]').forEach(x=>{const f=document.createElement('figure');
+    f.innerHTML='<img src="assets/'+x.i+'"><figcaption>New view: '+x.n+'</figcaption>';ex.appendChild(f)});
+  cap.textContent=el.dataset.cap.replace(/&middot;/g,'\u00b7')}
+function setMode(m){mode=m;localStorage.setItem('studioMode',m);document.body.className='m-'+m;
+  document.querySelectorAll('#mode button').forEach(b=>b.classList.toggle('on',b.dataset.m===m));if(cur)show(cur)}
+document.querySelectorAll('#mode button').forEach(b=>b.addEventListener('click',()=>setMode(b.dataset.m)));
+document.addEventListener('keydown',e=>{if(e.key==='t'&&!e.metaKey&&!e.ctrlKey){setMode({both:'mcp',mcp:'screen',screen:'both'}[mode])}});
 shots.forEach(i=>i.addEventListener('click',()=>{show(i);if(vid&&i.dataset.t)vid.currentTime=+i.dataset.t}));
 const io=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting)show(e.target)})},{root:document.getElementById('chat'),rootMargin:'-35% 0px -55% 0px'});
-shots.forEach(i=>io.observe(i));if(shots[0])show(shots[0]);
+shots.forEach(i=>io.observe(i));setMode(mode);if(shots[0])show(shots[0]);
 document.querySelectorAll('.voice[data-t]').forEach(v=>v.addEventListener('click',()=>{if(vid)vid.currentTime=+v.dataset.t}));
 """
 
@@ -322,13 +345,21 @@ def md(text):
     return "".join(out)
 
 
+TRIGGER_LABEL = {"task-done": "task done", "progress": "while working", "sheet-change": "view change",
+                 "user-change": "user action", "baseline": "before", "change": "workbook change"}
+
+
 def shot_html(s):
     if not (s["mcp"] or s["screen"]):
         return ""
     t = f' data-t="{s["video_sec"]:.1f}"' if s["video_sec"] is not None else ""
-    imgs = "".join(f'<img loading="lazy" src="assets/{s[k]}">' for k in ("mcp", "screen") if s[k])
-    cap = f'{s["ts"]:%H:%M:%S} UTC &middot; {html.escape(s["trigger"] or "")}' + (f' &middot; {html.escape(s["sheet"])}' if s["sheet"] else "")
-    return (f'<div class="shot" data-mcp="{s["mcp"] or ""}" data-screen="{s["screen"] or ""}" data-cap="{html.escape(cap, quote=True)}"{t}>'
+    imgs = "".join(f'<img class="{k}" loading="lazy" src="assets/{s[k]}">' for k in ("mcp", "screen") if s[k])
+    trig = TRIGGER_LABEL.get(s["trigger"], s["trigger"] or "")
+    cap = f'{s["ts"]:%H:%M:%S} UTC &middot; {html.escape(trig)}' + (f' &middot; {html.escape(s["detail"])}' if s.get("detail") else "") \
+        + (f' &middot; {html.escape(s["sheet"])}' if s["sheet"] else "")
+    extras = html.escape(json.dumps([{"n": x["name"], "i": x["img"]} for x in s.get("extras", [])]), quote=True)
+    return (f'<div class="shot {html.escape(s["trigger"] or "")}" data-mcp="{s["mcp"] or ""}" data-screen="{s["screen"] or ""}" '
+            f'data-extras="{extras}" data-cap="{html.escape(cap, quote=True)}"{t}>'
             f'<div class="pair">{imgs}</div><div class="cap">{cap}</div></div>')
 
 
@@ -357,9 +388,11 @@ def render(turns, title, video_name, whisper, video_start):
         parts.append('<section class="turn">' + "\n".join(body) + "</section>")
     vid = f'<video id="vid" controls src="assets/{video_name}"></video>' if video_name else ""
     return (f"<!doctype html><meta charset=utf-8><title>{html.escape(title)}</title><style>{CSS}</style>"
-            f'<header><h1>{html.escape(title)}</h1><span>{len(turns)} prompts &middot; replay of a Tableau Studio session</span></header>'
+            f'<header><h1>{html.escape(title)}</h1><span>{len(turns)} prompts &middot; replay of a Tableau Studio session</span>'
+            f'<div id="mode" role="group" aria-label="Screenshot view"><button data-m="both">Both</button>'
+            f'<button data-m="mcp">Sheet</button><button data-m="screen">Studio window</button></div></header>'
             f'<main><div id="chat">{"".join(parts)}</div><div id="stage"><div id="imgs"></div>'
-            f'<div id="cap"></div>{vid}</div></main><script>{JS}</script>')
+            f'<div id="extras"></div><div id="cap"></div>{vid}</div></main><script>{JS}</script>')
 
 
 def main():

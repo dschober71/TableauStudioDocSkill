@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
 """snapshot_watchdog.py - zero-LLM watchdog for a Tableau Studio demo.
 
-Tails the newest Studio session log. When the agent finishes a task (assistant stop_reason == end_turn)
-it waits until Tableau is IDLE, then captures, side by side:
+Tails the newest Studio session log and captures when:
+  * task-done     the agent finishes a task (stop_reason == end_turn) - waits until Tableau is IDLE first
+  * progress      every --progress seconds while the agent works on a prompt (frames between the steps)
+  * sheet-change  a tab switch, new, renamed or removed view (agent or user, polled every --watch seconds);
+                  new views that are not active are exported too ("extras")
+  * user-change   the window changed while the agent is idle (user clicked a filter, selection, ...); --no-pixel-watch disables
+  * baseline      once at start
+Each capture holds, side by side:
   * MCP image   - export of the ACTIVE sheet via the tableau-desktop MCP (worksheet, dashboard or storyboard,
                   chosen from get-workbook-inventory) - crisp, full resolution, no UI chrome
   * Screen shot - the real Tableau window (agent pane, chat, selections) via macOS screencapture
@@ -14,7 +20,7 @@ compete with the agent's MCP calls. Needs: pip mcp; Screen Recording permission 
   snapshot_watchdog.py --out snaps/            # run before the demo, Ctrl-C afterwards
   snapshot_watchdog.py --out snaps/ --on-change  # also capture after each workbook-changing tool call
 """
-import argparse, asyncio, base64, json, re, subprocess, time
+import argparse, asyncio, base64, hashlib, json, re, subprocess, time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -59,65 +65,176 @@ def preflight(fix=False):
     return bool(ok) and bool(w)
 
 
+def md5(path):
+    try:
+        return hashlib.md5(Path(path).read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+def is_prompt(rec):
+    """A real user prompt (not a tool_result echo) in a session record."""
+    if rec.get("type") != "user":
+        return False
+    c = (rec.get("message") or {}).get("content")
+    if isinstance(c, str):
+        return True
+    return isinstance(c, list) and any(b.get("type") == "text" for b in c) and not any(b.get("type") == "tool_result" for b in c)
+
+
 class Watchdog:
     def __init__(self, a):
         self.a, self.out = a, Path(a.out)
         self.out.mkdir(parents=True, exist_ok=True)
         self.session, self.offset = None, 0
+        self.busy = False                 # agent is working on a prompt (prompt seen, no end_turn yet)
+        self.sig = None                   # (active sheet id, ((id, name, type), ...)) from get-workbook-inventory
+        self.last_screen_md5 = None       # last window shot that went into the manifest
+        self.prev_tick_md5 = None
+        self.last_mcp = {}                # sheet id -> (md5, file name) so identical exports are stored once
+        self.last_progress = 0.0
 
     async def wait_idle(self, mcp, timeout=25):
         end = time.time() + timeout
         while time.time() < end:
-            st = json.loads(text_of(await mcp.call_tool("get-desktop-state", {})) or "{}")
-            if st.get("state") == "IDLE":
+            if await self.is_idle(mcp):
                 return True
             await asyncio.sleep(1)
         return False
 
-    async def capture(self, mcp, trigger, detail=""):
-        await self.wait_idle(mcp)
-        await asyncio.sleep(self.a.settle)  # let rendering finish
+    async def is_idle(self, mcp):
+        try:
+            return json.loads(text_of(await mcp.call_tool("get-desktop-state", {})) or "{}").get("state") == "IDLE"
+        except Exception:
+            return False
+
+    async def inventory(self, mcp):
+        """-> (sheets, active, title) or None if Desktop is not answering."""
+        try:
+            inv = json.loads(text_of(await mcp.call_tool("get-workbook-inventory", {})))
+        except Exception:
+            return None
+        sheets = inv.get("worksheets", []) + inv.get("dashboards", []) + inv.get("storyboards", [])
+        return sheets, next((x for x in sheets if x.get("isActiveSheet")), None), inv.get("title")
+
+    async def export_sheet(self, mcp, sheet, dest):
+        """Export one sheet via MCP (to file, then inline). Returns (file name or None, error or None)."""
+        tool, key = EXPORT_TOOL.get(sheet.get("type", "WORKSHEET"), EXPORT_TOOL["WORKSHEET"])
+        err = None
+        for args in ({key: sheet["name"], "filePath": str(dest)}, {key: sheet["name"]}):
+            try:
+                res = await mcp.call_tool(tool, args)
+            except Exception as e:
+                err = repr(e)[:200]
+                continue
+            if res.isError:
+                err = text_of(res)[:200] or "tool error"
+                continue
+            for c in res.content:  # inline mode returns the image as base64
+                if getattr(c, "type", "") == "image":
+                    dest.write_bytes(base64.b64decode(c.data))
+            if dest.exists():
+                h = md5(dest)
+                old = self.last_mcp.get(sheet.get("id"))
+                if old and old[0] == h:      # same picture as last time: reuse, don't store twice
+                    dest.unlink()
+                    return old[1], None
+                self.last_mcp[sheet.get("id")] = (h, dest.name)
+                return dest.name, None
+        print(f"  ! MCP export failed for '{sheet['name']}': {err or 'no image'}")
+        return None, err or "export produced no image"
+
+    async def capture(self, mcp, trigger, detail="", wait=True, keep_duplicates=True):
+        """wait=True: let Tableau go IDLE first. wait=False (mid-task): never block; MCP export only if Tableau is idle right now."""
+        idle = (await self.wait_idle(mcp)) if wait else (await self.is_idle(mcp))
+        if wait:
+            await asyncio.sleep(self.a.settle)  # let rendering finish
         now = datetime.now(timezone.utc)
         stamp = now.strftime("%Y%m%dT%H%M%S")
-        rec = {"ts": now.isoformat(), "trigger": trigger, "detail": detail[:200], "session": self.session and self.session.stem}
+        rec = {"ts": now.isoformat(), "trigger": trigger, "detail": detail[:200], "session": self.session and self.session.stem,
+               "busy": self.busy}
         screen = self.out / f"{stamp}_screen.png"
         kind = screen_capture(screen)
+        h = md5(screen) if kind else None
         if kind:
+            if not keep_duplicates and h == self.last_screen_md5 and not detail:
+                screen.unlink()
+                return False
             rec["screen_img"], rec["screen_kind"] = screen.name, kind
+            self.last_screen_md5 = h
             if kind == "screen":
                 print("  ! Tableau window not found - captured the whole screen instead")
         else:
             print("  ! screenshot failed - run with --check")
-        try:
-            inv = json.loads(text_of(await mcp.call_tool("get-workbook-inventory", {})))
-            sheets = inv.get("worksheets", []) + inv.get("dashboards", []) + inv.get("storyboards", [])
-            active = next((s for s in sheets if s.get("isActiveSheet")), None)
-            rec["workbook"] = inv.get("title")
+        inv = await self.inventory(mcp)
+        if inv:
+            sheets, active, title = inv
+            rec["workbook"] = title
+            self.sig = self.signature(sheets)
             if active:
-                tool, key = EXPORT_TOOL.get(active.get("type", "WORKSHEET"), EXPORT_TOOL["WORKSHEET"])
-                img = self.out / f"{stamp}_mcp.png"
                 rec.update(sheet=active["name"], sheet_type=active.get("type"))
-                err = None
-                for args in ({key: active["name"], "filePath": str(img)}, {key: active["name"]}):  # to file, then inline
-                    res = await mcp.call_tool(tool, args)
-                    if res.isError:
-                        err = text_of(res)[:200] or "tool error"
+                if idle:
+                    rec["mcp_img"], err = await self.export_sheet(mcp, active, self.out / f"{stamp}_mcp.png")
+                    if err:
+                        rec["mcp_error"] = err
+                else:
+                    rec["mcp_img"] = self.last_mcp.get(active.get("id"), (None, None))[1]  # busy: show the last known picture
+                    rec["mcp_stale"] = True
+            if idle:  # views the agent created alongside (not the active one): export them too
+                rec["extras"] = []
+                for sh in sheets:
+                    if sh.get("id") in self.known_ids or sh is active or sh.get("id") == (active or {}).get("id"):
                         continue
-                    for c in res.content:  # inline mode returns the image as base64
-                        if getattr(c, "type", "") == "image":
-                            img.write_bytes(base64.b64decode(c.data))
-                    if img.exists():
-                        err = None
-                        break
-                rec["mcp_img"] = img.name if img.exists() else None
-                if not rec["mcp_img"]:
-                    rec["mcp_error"] = err or "export produced no image"
-                    print(f"  ! MCP export failed for '{active['name']}': {rec['mcp_error']}")
-        except Exception as e:  # never let a capture error kill the watchdog
-            rec["error"] = repr(e)[:200]
+                    f, _ = await self.export_sheet(mcp, sh, self.out / f"{stamp}_view_{len(rec['extras'])}.png")
+                    if f:
+                        rec["extras"].append({"name": sh["name"], "type": sh.get("type"), "img": f})
+                self.known_ids |= {sh.get("id") for sh in sheets}
         with (self.out / "manifest.jsonl").open("a") as f:
             f.write(json.dumps(rec) + "\n")
-        print(f"[{now:%H:%M:%S}] {trigger}: sheet={rec.get('sheet')} mcp={rec.get('mcp_img')} screen={rec.get('screen_img')}")
+        extra = f" +{len(rec.get('extras', []))} new view(s)" if rec.get("extras") else ""
+        print(f"[{now:%H:%M:%S}] {trigger}{' - ' + detail if detail else ''}: sheet={rec.get('sheet')} "
+              f"mcp={rec.get('mcp_img')} screen={rec.get('screen_img')}{extra}")
+        return True
+
+    known_ids = set()
+
+    @staticmethod
+    def signature(sheets):
+        active = next((x.get("id") for x in sheets if x.get("isActiveSheet")), None)
+        return active, tuple(sorted((x.get("id"), x.get("name"), x.get("type")) for x in sheets))
+
+    def describe_change(self, old, new, sheets):
+        who = "agent" if self.busy else "user"
+        names = {i: n for i, n, _ in new[1]}
+        added = [n for i, n, _ in new[1] if i not in {o[0] for o in old[1]}]
+        gone = [n for i, n, _ in old[1] if i not in names]
+        renamed = [n for i, n, _ in new[1] if i in {o[0] for o in old[1]} and (i, n) not in {(o[0], o[1]) for o in old[1]}]
+        if added:
+            return f"{who}: new view {', '.join(added)[:80]}"
+        if gone:
+            return f"{who}: removed view {', '.join(gone)[:80]}"
+        if renamed:
+            return f"{who}: renamed {', '.join(renamed)[:80]}"
+        return f"{who}: switched to {names.get(new[0], '?')}"
+
+    async def tick(self, mcp):
+        """Every --watch seconds: catch tab switches / new views (inventory), pixel changes by the user, and mid-task progress."""
+        now = time.time()
+        probe = self.out / ".probe.png"
+        kind = screen_capture(probe) if not self.a.no_pixel_watch else None
+        h = md5(probe) if kind else None
+        probe.unlink(missing_ok=True)
+        inv = await self.inventory(mcp)
+        if inv and self.sig is not None and self.signature(inv[0]) != self.sig:
+            new = self.signature(inv[0])
+            await self.capture(mcp, "sheet-change", self.describe_change(self.sig, new, inv[0]), wait=not self.busy)
+            self.last_progress = now
+        elif self.busy and now - self.last_progress >= self.a.progress:
+            self.last_progress = now
+            await self.capture(mcp, "progress", wait=False, keep_duplicates=False)
+        elif (not self.busy and h and h != self.last_screen_md5 and h == self.prev_tick_md5):  # changed, and stable for one tick
+            await self.capture(mcp, "user-change", "user: changed the view", wait=False, keep_duplicates=False)
+        self.prev_tick_md5 = h
 
     def new_records(self):
         s = newest_session(self.a.log_dir)
@@ -151,20 +268,27 @@ class Watchdog:
                 f, how = studio_logs.newest_session(self.a.log_dir)
                 print(f"session log: {f} (found via {how})")
                 self.new_records()  # skip history, start at end of current log
+                inv = await self.inventory(mcp)
+                if inv:  # sheets that exist now are not "new" views
+                    self.known_ids = {x.get("id") for x in inv[0]}
                 await self.capture(mcp, "baseline")
-                print("watching for finished tasks (Ctrl-C to stop)")
+                print(f"watching: task-done, sheet changes, user changes, progress every {self.a.progress:g}s while the agent works (Ctrl-C to stop)")
                 tool_names = {}
+                last_tick = 0.0
                 while True:
                     trigger = None
                     for rec in self.new_records():
                         m = rec.get("message") or {}
                         c = m.get("content")
+                        if is_prompt(rec):
+                            self.busy, self.last_progress = True, time.time()
                         if rec.get("type") == "assistant" and isinstance(c, list):
                             for b in c:
                                 if b.get("type") == "tool_use":
                                     tool_names[b["id"]] = b["name"]
                             if m.get("stop_reason") == "end_turn" and any(b.get("type") == "text" for b in c):
                                 trigger = ("task-done", next(b["text"] for b in c if b.get("type") == "text"))
+                                self.busy = False
                         elif rec.get("type") == "user" and isinstance(c, list) and self.a.on_change and not trigger:
                             for b in c:
                                 n = tool_names.get(b.get("tool_use_id"), "")
@@ -172,6 +296,10 @@ class Watchdog:
                                     trigger = ("change", n.split("__")[-1])
                     if trigger:
                         await self.capture(mcp, *trigger)
+                        last_tick = time.time()
+                    elif time.time() - last_tick >= self.a.watch:
+                        last_tick = time.time()
+                        await self.tick(mcp)
                     await asyncio.sleep(self.a.poll)
 
 
@@ -181,6 +309,9 @@ def main():
     ap.add_argument("--log-dir", help="folder with Studio session *.jsonl (default: auto-detect)")
     ap.add_argument("--poll", type=float, default=1.0, help="seconds between log checks (cheap file read)")
     ap.add_argument("--settle", type=float, default=1.5, help="extra wait after Tableau reports IDLE")
+    ap.add_argument("--watch", type=float, default=3.0, help="seconds between checks for tab switches, new views and user changes")
+    ap.add_argument("--progress", type=float, default=6.0, help="while the agent works: take a frame at least this often (seconds)")
+    ap.add_argument("--no-pixel-watch", action="store_true", help="only detect tab/view changes, not other visible changes by the user")
     ap.add_argument("--on-change", action="store_true", help="also capture after workbook-changing tool calls")
     ap.add_argument("--check", action="store_true", help="check permissions + Tableau window, take a test shot, exit")
     ap.add_argument("--grant", action="store_true", help="like --check, but trigger the macOS permission prompt and open Settings")

@@ -15,6 +15,13 @@ Joining the two by timestamp is the whole trick.
 Open Claude Code in this folder and say "start the demo watchdog" (or `/studio-demo-doc`). Do the demo in Studio, then say "stop and build":
 you get `packages/<name>/index.html` (+ zip) from the agent chat and all captured screenshots. See `.claude/skills/studio-demo-doc/SKILL.md`.
 
+## When frames are taken
+`task-done` (agent ends a turn, after Tableau is IDLE), `progress` (every `--progress` s, default 6, while the agent works on a prompt;
+MCP export only if Tableau is idle at that moment, otherwise the last known sheet image is reused), `sheet-change` (tab switch or
+new/renamed/removed view, polled every `--watch` s; views created alongside but not active are exported too), `user-change`
+(window changed while the agent is idle, stable for one tick; `--no-pixel-watch` turns it off). Identical images are stored once.
+The HTML has a **Both / Sheet / Studio window** toggle in the header (key `t` cycles; remembered).
+
 ## Pipeline (manual)
 1. **Record** the screen (OBS is installed) plus mic. Note the wall-clock start (UTC). Tip: say
    "start" while clapping the first prompt in; or use the file's creation time.
