@@ -237,6 +237,9 @@ main{display:grid;grid-template-columns:minmax(380px,40%) 1fr;height:calc(100vh 
 .turn{margin-bottom:26px}.msg{padding:9px 13px;border-radius:12px;margin:6px 0;max-width:94%;white-space:pre-wrap;word-wrap:break-word}
 .user{background:var(--acc);color:#fff;margin-left:auto;border-bottom-right-radius:3px}
 .md{white-space:normal}.md p{margin:0 0 8px}.md p:last-child,.md ul:last-child,.md ol:last-child{margin-bottom:0}.md ul,.md ol{margin:0 0 8px;padding-left:22px}.md li{margin:3px 0}.md code{font:12px ui-monospace,Menlo,monospace;background:#eef2f8;padding:1px 4px;border-radius:4px}
+.chatter{margin:4px 0 4px 26px;padding:2px 0 2px 12px;border-left:3px solid #c9d3e3;border-radius:0;max-width:86%;font-size:12.5px;color:var(--mut);background:none}
+.chatter p{margin:0 0 4px}
+.final{border-left:4px solid var(--acc)}.lbl{font:600 10px/1 inherit;text-transform:uppercase;letter-spacing:.06em;color:var(--acc);margin-bottom:5px}
 .say{background:var(--card);border:1px solid var(--line);border-bottom-left-radius:3px}
 .meta,.ctx{font-size:11px;color:var(--mut);margin:0 4px 4px}
 details.group{margin:6px 0;border:1px solid var(--line);border-radius:10px;background:#fff}
@@ -379,7 +382,10 @@ def render(turns, title, video_name, whisper, video_start):
         if data:
             body.append(f'<details class="group"><summary>Data &amp; fields used &middot; {len(data)} lookups</summary>'
                         + "".join(fmt_tool(e) for e in data) + "</details>")
-        body += [f'<div class="msg say md">{md(e["text"])}</div>' for e in says]
+        for i, e in enumerate(says):  # earlier text = agent chatter between steps; the last text = the answer to the prompt
+            final = i == len(says) - 1
+            body.append(f'<div class="msg md {"say final" if final else "chatter"}">'
+                        + ('<div class="lbl">Answer</div>' if final and len(says) > 1 else "") + md(e["text"]) + "</div>")
         body += [shot_html(s) for s in turn.get("shots", [])]
         if video_start and whisper:
             lo, hi = (t0 - video_start).total_seconds(), (turn["t1"] - video_start).total_seconds()
