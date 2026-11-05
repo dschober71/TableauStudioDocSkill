@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "tableau-desktop": {
+      "command": "./run-tableau-desktop-mcp.sh",
+      "args": []
+    }
+  }
+}

@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.DS_Store
+.claude/
+
+# Demo outputs (large, machine-specific)
+snaps/
+my_demo/
+demo_pkg/
+out/
+*.mp4
+*.mov
+*.mkv
+rec*.json
