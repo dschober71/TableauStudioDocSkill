@@ -12,6 +12,7 @@ of what it looked like - no manual screenshots, no video editing.
 - Screenshots in two flavors: the **sheet** exported through the Tableau MCP (clean, full resolution) and the **Studio window** (agent pane, chat, selections).
   A header toggle switches **Both / Sheet / Studio window** (key `t` cycles; remembered).
 - **Clear flow**: numbered prompts, the agent's work tucked into a muted "Behind the scenes" lane, one highlighted Answer, plus yellow comments.
+- **Comments**: type `note: ...` in Studio, click **+ comment** in the page, or add them from Claude; they show as yellow notes in the flow (see [Comments](#comments)).
 - **Edit mode**: tick prompts, steps, chatter, screenshots; delete them (undo available); save a cleaned page.
 - Optional: your screen recording and Whisper narration, synced to the chat.
 
