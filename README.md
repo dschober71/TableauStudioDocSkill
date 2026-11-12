@@ -105,6 +105,7 @@ Add your own remarks to the page, highlighted as yellow notes in the flow. Three
 - **Privacy:** transcripts and screenshots can contain customer or workbook data. Review the page (use Edit to remove parts) before sharing it.
 - **Thinking is not available:** the agent log stores only encrypted or empty thinking blocks; the tool-call trail is the visible reasoning.
 - **Window not found:** if Studio is minimized or on another Space, shots fall back to the whole screen and the watchdog says so.
+- **Several Tableau windows:** with more than one Tableau open, the watchdog binds the MCP export and the window shot to the instance whose workbook your Studio prompts come from (and follows you if you prompt in another window). Pin one with `--instance Book2` (workbook name, MCP session id or pid). `--check` warns when several are open.
 - **Several sessions:** `--session auto` uses the session seen most often in the snapshots and tells you if there were others.
 - **Permission:** if `--check` says Screen Recording is not granted, run `--grant`, enable the app in System Settings, **restart that app**, re-check.
 

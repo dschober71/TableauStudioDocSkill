@@ -46,16 +46,24 @@ def on_screen_windows():
     for w in plistlib.loads(raw):
         b = w.get("kCGWindowBounds", {})
         out.append({"owner": w.get("kCGWindowOwnerName", ""), "title": w.get("kCGWindowName", ""),
-                    "id": w.get("kCGWindowNumber"), "layer": w.get("kCGWindowLayer"),
+                    "id": w.get("kCGWindowNumber"), "pid": w.get("kCGWindowOwnerPID"), "layer": w.get("kCGWindowLayer"),
                     "w": int(b.get("Width", 0)), "h": int(b.get("Height", 0))})
     return out
 
 
-def find_window(owner="Tableau", title_contains=None):
-    """Largest normal window of the app named `owner` (Tableau Studio/Desktop's process is called 'Tableau')."""
+def find_window(owner="Tableau", title_contains=None, pid=None):
+    """Largest normal window of the app named `owner` (Tableau Studio/Desktop's process is called 'Tableau').
+    pid: only that process (one Tableau instance per pid). """
     ws = [w for w in on_screen_windows() if w["owner"] == owner and w["layer"] == 0
-          and (title_contains is None or title_contains in w["title"])]
+          and (pid is None or w["pid"] == pid) and (title_contains is None or title_contains in w["title"])]
     return max(ws, key=lambda w: w["w"] * w["h"], default=None)
+
+
+def frontmost_pid(owner="Tableau"):
+    """pid of the frontmost normal window of `owner` (what the user is looking at)."""
+    for w in on_screen_windows():
+        if w["owner"] == owner and w["layer"] == 0 and w["w"] > 400:
+            return w["pid"]
 
 
 def capture_window(window_id, dest):

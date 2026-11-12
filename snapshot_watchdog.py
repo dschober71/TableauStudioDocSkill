@@ -42,9 +42,17 @@ def text_of(res):
     return "".join(getattr(c, "text", "") for c in res.content)
 
 
-def screen_capture(dest):
-    """Capture the Tableau window (even if covered by other windows); fall back to the whole screen."""
-    w = macperms.find_window("Tableau")
+def prompt_workbook(rec):
+    """Workbook name from the <live-tableau-context> header of a user prompt, else None."""
+    c = (rec.get("message") or {}).get("content")
+    m = re.search(r"<live-tableau-context>.*?^workbook:\s*(.+?)\s*$", c, re.S | re.M) if isinstance(c, str) else None
+    return m.group(1) if m else None
+
+
+def screen_capture(dest, pid=None):
+    """Capture the Tableau window (even if covered by other windows); fall back to the whole screen.
+    pid: the Tableau instance the demo runs in (several Tableau windows may be open)."""
+    w = macperms.find_window("Tableau", pid=pid)
     if w and macperms.capture_window(w["id"], dest):
         return "window"
     return "screen" if subprocess.run(["screencapture", "-x", str(dest)], capture_output=True).returncode == 0 and dest.exists() else None
@@ -57,6 +65,10 @@ def preflight(fix=False):
     w = macperms.find_window("Tableau")
     print(f"Screen Recording for {app}: {'granted' if ok else 'NOT granted' if ok is False else 'unknown'}")
     print(f"Tableau window: {w['title'].splitlines()[0][:70] if w else 'not found (is Studio open and not minimized?)'}")
+    allw = [x for x in macperms.on_screen_windows() if x["owner"] == "Tableau" and x["layer"] == 0 and x["w"] > 400]
+    if len(allw) > 1:
+        print(f"! {len(allw)} Tableau windows open: " + "; ".join(f"{x['title'].splitlines()[0][10:40]} (pid {x['pid']})" for x in allw)
+              + "\n  the watchdog follows the workbook your Studio prompts come from; pin one with --instance <workbook>")
     if ok is False:
         print(f"  -> System Settings > Privacy & Security > Screen & System Audio Recording > enable {app}, then restart {app}.")
         if fix:
@@ -87,12 +99,53 @@ class Watchdog:
         self.a, self.out = a, Path(a.out)
         self.out.mkdir(parents=True, exist_ok=True)
         self.session, self.offset = None, 0
+        self.instance = self.pid = None   # which Tableau instance (MCP session id / process id) is being documented
         self.busy = False                 # agent is working on a prompt (prompt seen, no end_turn yet)
         self.sig = None                   # (active sheet id, ((id, name, type), ...)) from get-workbook-inventory
         self.last_screen_md5 = None       # last window shot that went into the manifest
         self.prev_tick_md5 = None
         self.last_mcp = {}                # sheet id -> (md5, file name) so identical exports are stored once
         self.last_progress = 0.0
+
+    async def call(self, mcp, name, args, session=None):
+        """MCP call routed to the Tableau instance we are documenting (needed when several are open)."""
+        session = session or self.instance
+        return await mcp.call_tool(name, dict(args, session=session) if session else args)
+
+    async def resolve_instance(self, mcp, workbook=None):
+        """Pick which running Tableau the demo is in: --instance, else the instance whose workbook matches the one named in the
+        agent session's prompt header, else the frontmost Tableau window. Sets self.instance (MCP session id) and self.pid."""
+        want = self.a.instance
+        try:
+            insts = json.loads(text_of(await mcp.call_tool("list-instances", {}))).get("instances", [])
+        except Exception:
+            insts = []
+        if len(insts) <= 1:
+            self.instance, self.pid = None, (insts[0]["pid"] if insts else None)
+            return
+        pick = None
+        if want and want.isdigit():
+            pick = next((i for i in insts if str(i["sessionId"]) == want or str(i["pid"]) == want), None)
+        names = {}
+        for i in insts:
+            try:
+                names[i["sessionId"]] = json.loads(text_of(await self.call(mcp, "get-workbook-inventory", {}, i["sessionId"]))).get("title")
+            except Exception:
+                names[i["sessionId"]] = None
+        for key in (want if want and not want.isdigit() else None, workbook):
+            if not pick and key:
+                pick = next((i for i in insts if names.get(i["sessionId"]) == key), None)
+        if not pick:
+            fp = macperms.frontmost_pid()
+            pick = next((i for i in insts if i["pid"] == fp), insts[0])
+        if pick["sessionId"] != self.instance:
+            print(f"  documenting Tableau instance {pick['sessionId']} (workbook: {names.get(pick['sessionId'])}); "
+                  f"{len(insts)} instances open: " + ", ".join(f"{k}={v}" for k, v in names.items()))
+            self.last_mcp, self.sig = {}, None
+            self.instance = pick['sessionId']
+            inv = await self.inventory(mcp)
+            self.known_ids = {x.get('id') for x in inv[0]} if inv else set()
+        self.instance, self.pid = pick["sessionId"], pick["pid"]
 
     async def wait_idle(self, mcp, timeout=25):
         end = time.time() + timeout
@@ -104,14 +157,14 @@ class Watchdog:
 
     async def is_idle(self, mcp):
         try:
-            return json.loads(text_of(await mcp.call_tool("get-desktop-state", {})) or "{}").get("state") == "IDLE"
+            return json.loads(text_of(await self.call(mcp, "get-desktop-state", {})) or "{}").get("state") == "IDLE"
         except Exception:
             return False
 
     async def inventory(self, mcp):
         """-> (sheets, active, title) or None if Desktop is not answering."""
         try:
-            inv = json.loads(text_of(await mcp.call_tool("get-workbook-inventory", {})))
+            inv = json.loads(text_of(await self.call(mcp, "get-workbook-inventory", {})))
         except Exception:
             return None
         sheets = inv.get("worksheets", []) + inv.get("dashboards", []) + inv.get("storyboards", [])
@@ -123,7 +176,7 @@ class Watchdog:
         err = None
         for args in ({key: sheet["name"], "filePath": str(dest)}, {key: sheet["name"]}):
             try:
-                res = await mcp.call_tool(tool, args)
+                res = await self.call(mcp, tool, args)
             except Exception as e:
                 err = repr(e)[:200]
                 continue
@@ -154,7 +207,7 @@ class Watchdog:
         rec = {"ts": now.isoformat(), "trigger": trigger, "detail": detail[:200], "session": self.session and self.session.stem,
                "busy": self.busy}
         screen = self.out / f"{stamp}_screen.png"
-        kind = screen_capture(screen)
+        kind = screen_capture(screen, self.pid)
         h = md5(screen) if kind else None
         if kind:
             if not keep_duplicates and h == self.last_screen_md5 and not detail:
@@ -268,6 +321,7 @@ class Watchdog:
                 f, how = studio_logs.newest_session(self.a.log_dir)
                 print(f"session log: {f} (found via {how})")
                 self.new_records()  # skip history, start at end of current log
+                await self.resolve_instance(mcp)
                 inv = await self.inventory(mcp)
                 if inv:  # sheets that exist now are not "new" views
                     self.known_ids = {x.get("id") for x in inv[0]}
@@ -282,6 +336,9 @@ class Watchdog:
                         c = m.get("content")
                         if is_prompt(rec):
                             self.busy, self.last_progress = True, time.time()
+                            wb = prompt_workbook(rec)
+                            if wb:                      # the user prompted in this workbook's window: follow it
+                                await self.resolve_instance(mcp, wb)
                         if rec.get("type") == "assistant" and isinstance(c, list):
                             for b in c:
                                 if b.get("type") == "tool_use":
@@ -313,6 +370,7 @@ def main():
     ap.add_argument("--progress", type=float, default=6.0, help="while the agent works: take a frame at least this often (seconds)")
     ap.add_argument("--no-pixel-watch", action="store_true", help="only detect tab/view changes, not other visible changes by the user")
     ap.add_argument("--on-change", action="store_true", help="also capture after workbook-changing tool calls")
+    ap.add_argument("--instance", help="several Tableau windows open? pin one: workbook name (e.g. Book2) or MCP session id / pid (see list-instances). Default: follows the workbook named in the agent's prompts, else the frontmost window")
     ap.add_argument("--check", action="store_true", help="check permissions + Tableau window, take a test shot, exit")
     ap.add_argument("--grant", action="store_true", help="like --check, but trigger the macOS permission prompt and open Settings")
     a = ap.parse_args()

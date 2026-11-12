@@ -14,6 +14,7 @@ Pick the mode from the user's words: **start**, **status**, or **stop/build**. I
 1. Preflight, once: `python3 snapshot_watchdog.py --out snaps --check`
    - Screen Recording not granted -> tell the user to run `python3 snapshot_watchdog.py --out snaps --grant`, enable the app, restart it. Stop here.
    - "Tableau window: not found" -> ask the user to bring Studio to the front (not minimized, current Space), then re-check. Whole-screen shots are the fallback, so continue only if the user says so.
+   - If it warns that several Tableau windows are open, ask which workbook the demo is in and start with `--instance <workbook>` (otherwise it follows the workbook named in the Studio prompts, else the frontmost window).
    - Remove `snaps/check.png` afterwards.
 2. Pick the capture folder: `snaps/<YYYYMMDD-HHMM>-<short-topic>` (ask nothing; derive topic from the user's words or use `demo`).
 3. Start in the background (Bash with `run_in_background: true`):
