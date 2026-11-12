@@ -54,7 +54,11 @@ def strip_context(text):
                 k, v = line.split(":", 1)
                 ctx[k.strip()] = v.strip()
         text = text.replace(m.group(0), "")
+    text = re.sub(r"^\s*\[Skills\][^\n]*\n*", "", text)          # Studio's injected skill hint, not the user's words
     return ctx, text.strip()
+
+
+COMMENT_RE = re.compile(r"^\s*/?(?:note|comment)\s*[:\-]\s*(.+)$", re.I | re.S)   # "note: ..." typed in Studio = a comment
 
 
 def short_result(content, limit=4000):
@@ -78,7 +82,9 @@ def parse_session(path):
         if typ == "user" and isinstance(content, str) and "<live-tableau-context>" in content or \
            typ == "user" and isinstance(content, str) and not content.startswith("<"):
             ctx, prompt = strip_context(content)
-            cur = {"t0": t, "t1": t, "ctx": ctx, "prompt": prompt, "events": [], "snap_ts": []}
+            cm = COMMENT_RE.match(prompt)
+            cur = {"t0": t, "t1": t, "ctx": ctx, "prompt": prompt, "events": [], "snap_ts": [],
+                   "comment": cm.group(1).strip() if cm else None}
             turns.append(cur)
         elif cur is None or t is None:
             continue
@@ -221,18 +227,18 @@ CSS = """
 header{padding:14px 24px;background:#10233d;color:#fff;display:flex;gap:16px;align-items:baseline}
 header h1{font-size:17px;margin:0}header span{opacity:.7;font-size:12px}
 #mode{margin-left:auto;display:flex;border:1px solid #ffffff55;border-radius:8px;overflow:hidden;align-self:center}
-#mode button{background:none;border:0;color:#fff;opacity:.7;padding:4px 12px;font:12px inherit;cursor:pointer}#mode button.on{background:#ffffff30;opacity:1;font-weight:600}
+#mode button{background:none;border:0;color:#fff;opacity:.7;padding:4px 12px;font:12px -apple-system,sans-serif;cursor:pointer}#mode button.on{background:#ffffff30;opacity:1;font-weight:600}
 .shot.progress{border-left:4px solid #c9d3e3}.shot.sheet-change{border-left:4px solid #2e9e5b}.shot.user-change{border-left:4px solid #f0a800}
 .turn,details.tool,details.group,.msg,.shot,.voice{position:relative}
 .sel{display:none;position:absolute;top:5px;right:7px;z-index:3;width:17px;height:17px;cursor:pointer;accent-color:#d93025}
 .turn>.sel{right:auto;left:-4px;top:-8px;width:19px;height:19px}.shot>.sel{background:#fff}
 body.edit .sel{display:block}body.edit .picked{outline:2px solid #d93025;outline-offset:1px;background-image:linear-gradient(#d9302512,#d9302512)}
 body.edit .shot:hover{border-color:transparent}.del{display:none!important}
-#edit{background:none;border:1px solid #ffffff55;color:#fff;border-radius:8px;padding:4px 12px;font:12px inherit;cursor:pointer;opacity:.8}
+#edit{background:none;border:1px solid #ffffff55;color:#fff;border-radius:8px;padding:4px 12px;font:12px -apple-system,sans-serif;cursor:pointer;opacity:.8}
 body.edit #edit{background:#d93025;border-color:#d93025;opacity:1}
 #bar{display:none;position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:9;background:#10233d;color:#fff;border-radius:12px;
  padding:8px 12px;gap:8px;align-items:center;box-shadow:0 6px 24px #0006;font-size:13px}body.edit #bar{display:flex}
-#bar button{background:#ffffff22;border:0;color:#fff;border-radius:8px;padding:5px 12px;font:12px inherit;cursor:pointer}
+#bar button{background:#ffffff22;border:0;color:#fff;border-radius:8px;padding:5px 12px;font:12px -apple-system,sans-serif;cursor:pointer}
 #bar button:disabled{opacity:.35;cursor:default}#bar #del:not(:disabled){background:#d93025}#bar #save{background:#0b6fd6}
 body.m-mcp .shot img.screen,body.m-screen .shot img.mcp{display:none}
 #extras{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}#extras figure{margin:0;max-width:30%;text-align:center}
@@ -250,7 +256,7 @@ main{display:grid;grid-template-columns:minmax(380px,40%) 1fr;height:calc(100vh 
 .md{white-space:normal}.md p{margin:0 0 8px}.md p:last-child,.md ul:last-child,.md ol:last-child{margin-bottom:0}.md ul,.md ol{margin:0 0 8px;padding-left:22px}.md li{margin:3px 0}.md code{font:12px ui-monospace,Menlo,monospace;background:#eef2f8;padding:1px 4px;border-radius:4px}
 .chatter{margin:4px 0 4px 26px;padding:2px 0 2px 12px;border-left:3px solid #c9d3e3;border-radius:0;max-width:86%;font-size:12.5px;color:var(--mut);background:none}
 .chatter p{margin:0 0 4px}
-.final{border-left:4px solid var(--acc)}.lbl{font:600 10px/1 inherit;text-transform:uppercase;letter-spacing:.06em;color:var(--acc);margin-bottom:5px}
+.final{border-left:4px solid var(--acc)}.lbl{font:600 10px/1.2 -apple-system,Segoe UI,sans-serif;text-transform:uppercase;letter-spacing:.06em;color:var(--acc);margin-bottom:5px}
 .say{background:var(--card);border:1px solid var(--line);border-bottom-left-radius:3px}
 .meta,.ctx{font-size:11px;color:var(--mut);margin:0 4px 4px}
 details.group{margin:6px 0;border:1px solid var(--line);border-radius:10px;background:#fff}
@@ -263,6 +269,26 @@ details.group[open]>summary{border-bottom:1px solid var(--line)}
 .shot .pair{display:flex;gap:2px}.shot img{width:100%;min-width:0;display:block;flex:1}
 .shot .cap{font-size:11px;color:var(--mut);padding:3px 8px}.shot.on,.shot:hover{border-color:var(--acc)}
 .voice{border-left:3px solid #f0a800;padding:3px 10px;color:#5a4300;background:#fff8e1;font-style:italic;margin:4px 0;font-size:13px}
+
+/* ---- flow: you -> behind the scenes -> answer ---- */
+.turn{margin-bottom:34px;padding-top:14px;border-top:2px solid #cfd6e2}.turn:first-child{border-top:0;padding-top:0}
+.thead{display:flex;align-items:center;gap:8px;margin:0 2px 6px}.thead .ctx{margin:0}
+.num{background:#10233d;color:#fff;border-radius:50%;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;font:600 11px -apple-system,sans-serif}
+.user{max-width:100%;margin:4px 0 10px;background:#10233d;border-radius:10px;font-size:15px;font-weight:500}
+.user .lbl{color:#9ec5f5}
+.say.final{max-width:100%;margin:12px 0;background:#fff;border:1px solid #b9d3f2;border-left:5px solid var(--acc);border-radius:10px;font-size:14.5px;box-shadow:0 1px 6px #0b6fd622}
+.final .lbl{color:var(--acc)}
+.work{margin:4px 0 4px 12px;padding:4px 0 4px 14px;border-left:2px dashed #b7c0cf}
+.wlbl{font:600 10px/1.2 -apple-system,Segoe UI,sans-serif;text-transform:uppercase;letter-spacing:.08em;color:#8a94a6;margin:2px 0 6px}
+.work details.group{background:#f0f2f6;border:1px dashed #c4ccd9;box-shadow:none;max-width:92%}
+.work details.group>summary{font-weight:500;font-size:11.5px}
+.work .chatter{margin:4px 0;border-left:3px solid #c9d3e3;font-style:italic}
+.shot{max-width:100%}
+.comment{background:#fff6c9;border:1px solid #f0d34a;border-left:6px solid #f0a800;border-radius:6px;padding:8px 12px;margin:12px 0 12px 20px;max-width:90%;box-shadow:2px 2px 0 #f0d34a55;position:relative}
+.comment .lbl{color:#8a5a00}.comment .ctext{white-space:pre-wrap;color:#3d2f00;font-size:14px}
+.cturn{border-top:0;padding-top:0;margin-bottom:18px}
+.addc{display:block;margin:6px 0 0 auto;background:none;border:1px dashed #c4ccd9;color:var(--mut);border-radius:6px;font:11px -apple-system,sans-serif;padding:2px 9px;cursor:pointer;opacity:.0}
+.turn:hover .addc{opacity:1}.addc:hover{border-color:#f0a800;color:#8a5a00;background:#fff6c9}
 """
 JS = """
 const shots=[...document.querySelectorAll('.shot')],box=document.getElementById('imgs'),cap=document.getElementById('cap'),vid=document.getElementById('vid'),ex=document.getElementById('extras');
@@ -285,7 +311,7 @@ const io=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting)show(e
 shots.forEach(i=>io.observe(i));
 // ---- edit mode: select parts of the log, delete (undo-able), save a cleaned copy of this page
 const bar={cnt:document.getElementById('cnt'),del:document.getElementById('del'),undo:document.getElementById('undo')},hist=[];
-const items=[...document.querySelectorAll('.turn,details.tool,details.group,.chatter,.say,.shot,.voice')];
+const items=[...document.querySelectorAll('.turn,details.tool,details.group,.chatter,.say,.shot,.voice,.comment')];
 function upd(){const n=document.querySelectorAll('.picked').length;bar.cnt.textContent=n+' selected';bar.del.disabled=!n;bar.undo.disabled=!hist.length}
 items.forEach(el=>{const c=document.createElement('input');c.type='checkbox';c.className='sel';c.title='select';
   c.addEventListener('click',e=>e.stopPropagation());c.addEventListener('change',()=>{el.classList.toggle('picked',c.checked);upd()});el.prepend(c)});
@@ -300,6 +326,12 @@ document.getElementById('save').addEventListener('click',()=>{const d=document.d
   if(sp)sp.textContent=n+' prompts \u00b7 replay of a Tableau Studio session';
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['<!doctype html>'+d.outerHTML],{type:'text/html'}));
   a.download='index.cleaned.html';a.click()});
+// ---- comments: "+ comment" under each prompt; saved with "Save cleaned HTML" (Edit -> Save)
+function mkComment(text){const d=document.createElement('div');d.className='comment';
+  const l=document.createElement('div');l.className='lbl';l.textContent='\U0001F4AC Comment \u00b7 '+new Date().toISOString().slice(0,16).replace('T',' ');
+  const t=document.createElement('div');t.className='ctext';t.textContent=text;d.append(l,t);return d}
+document.querySelectorAll('.addc').forEach(b=>b.addEventListener('click',()=>{const t=prompt('Comment:');
+  if(t&&t.trim()){b.before(mkComment(t.trim()));alert('Added. To keep it: Edit -> Save cleaned HTML (see README, "Comments").')}}));
 setMode(mode);if(shots[0])show(shots[0]);
 document.querySelectorAll('.voice[data-t]').forEach(v=>v.addEventListener('click',()=>{if(vid)vid.currentTime=+v.dataset.t}));
 """
@@ -395,35 +427,51 @@ def shot_html(s):
             f'<div class="pair">{imgs}</div><div class="cap">{cap}</div></div>')
 
 
+def comment_html(text, who="Comment", when=""):
+    return (f'<div class="comment"><div class="lbl">&#128172; {html.escape(who)}{" &middot; " + html.escape(when) if when else ""}</div>'
+            f'<div class="ctext">{html.escape(text)}</div></div>')
+
+
 def render(turns, title, video_name, whisper, video_start):
-    parts = []
+    parts, n = [], 0
     for turn in turns:
         t0 = turn["t0"]
+        shots = [shot_html(s) for s in turn.get("shots", [])]
+        if turn.get("comment"):          # typed in Studio as "note: ..." -> a highlighted comment, the agent's "noted" reply is hidden
+            parts.append('<section class="turn cturn">' + comment_html(turn["comment"], "Comment from the demo", f"{t0:%H:%M:%S} UTC")
+                         + "".join(shots) + "</section>")
+            continue
+        n += 1
         tools = [e for e in turn["events"] if e["kind"] == "tool"]
         data = [e for e in tools if DATA_TOOLS.search(e["name"]) and e.get("result")]
         says = [e for e in turn["events"] if e["kind"] == "say"]
-        body = [f'<div class="ctx">{t0:%H:%M:%S} UTC &middot; sheet: {html.escape(turn["ctx"].get("active-sheet-name", "?"))}</div>',
-                f'<div class="msg user">{html.escape(turn["prompt"])}</div>']
+        body = [f'<div class="thead"><span class="num">{n}</span><span class="ctx">{t0:%H:%M:%S} UTC &middot; sheet: '
+                f'{html.escape(turn["ctx"].get("active-sheet-name", "?"))}</span></div>',
+                f'<div class="msg user"><div class="lbl">You asked</div>{html.escape(turn["prompt"])}</div>']
+        work = []
         if tools:
             nmut = sum(bool(MUTATING.search(e["name"])) for e in tools)
-            body.append(f'<details class="group"><summary>Analyzed &middot; {len(tools)} steps, {nmut} changed the workbook</summary>'
+            work.append(f'<details class="group"><summary>Analyzed &middot; {len(tools)} steps, {nmut} changed the workbook</summary>'
                         + "".join(fmt_tool(e) for e in tools) + "</details>")
         if data:
-            body.append(f'<details class="group"><summary>Data &amp; fields used &middot; {len(data)} lookups</summary>'
+            work.append(f'<details class="group"><summary>Data &amp; fields used &middot; {len(data)} lookups</summary>'
                         + "".join(fmt_tool(e) for e in data) + "</details>")
-        for i, e in enumerate(says):  # earlier text = agent chatter between steps; the last text = the answer to the prompt
-            final = i == len(says) - 1
-            body.append(f'<div class="msg md {"say final" if final else "chatter"}">'
-                        + ('<div class="lbl">Answer</div>' if final and len(says) > 1 else "") + md(e["text"]) + "</div>")
-        body += [shot_html(s) for s in turn.get("shots", [])]
+        for e in says[:-1]:  # earlier text = agent chatter between steps
+            work.append(f'<div class="msg md chatter">{md(e["text"])}</div>')
+        if work:
+            body.append('<div class="work"><div class="wlbl">Behind the scenes</div>' + "".join(work) + "</div>")
+        if says:                                  # the last text = the answer to the prompt
+            body.append(f'<div class="msg md say final"><div class="lbl">Answer</div>{md(says[-1]["text"])}</div>')
+        body += shots
         if video_start and whisper:
             lo, hi = (t0 - video_start).total_seconds(), (turn["t1"] - video_start).total_seconds()
             body += [f'<div class="voice" data-t="{w["start"]:.1f}">&#127908; {html.escape(w["text"])}</div>'
                      for w in whisper if lo <= w["start"] < hi]
+        body.append('<button class="addc" title="add a comment to this prompt">+ comment</button>')
         parts.append('<section class="turn">' + "\n".join(body) + "</section>")
     vid = f'<video id="vid" controls src="assets/{video_name}"></video>' if video_name else ""
     return (f"<!doctype html><meta charset=utf-8><title>{html.escape(title)}</title><style>{CSS}</style>"
-            f'<header><h1>{html.escape(title)}</h1><span>{len(turns)} prompts &middot; replay of a Tableau Studio session</span>'
+            f'<header><h1>{html.escape(title)}</h1><span>{n} prompts &middot; replay of a Tableau Studio session</span>'
             f'<div id="mode" role="group" aria-label="Screenshot view"><button data-m="both">Both</button>'
             f'<button data-m="mcp">Sheet</button><button data-m="screen">Studio window</button></div>'
             f'<button id="edit" title="select parts of the log and delete them">Edit</button></header>'

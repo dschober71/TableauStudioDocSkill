@@ -11,6 +11,7 @@ of what it looked like - no manual screenshots, no video editing.
 - Per prompt: an **Analyzed** dropdown (every tool call with input and result; workbook-changing ones in green) and a **Data & fields used** dropdown.
 - Screenshots in two flavors: the **sheet** exported through the Tableau MCP (clean, full resolution) and the **Studio window** (agent pane, chat, selections).
   A header toggle switches **Both / Sheet / Studio window** (key `t` cycles; remembered).
+- **Clear flow**: numbered prompts, the agent's work tucked into a muted "Behind the scenes" lane, one highlighted Answer, plus yellow comments.
 - **Edit mode**: tick prompts, steps, chatter, screenshots; delete them (undo available); save a cleaned page.
 - Optional: your screen recording and Whisper narration, synced to the chat.
 
@@ -68,12 +69,33 @@ python3 studio_prune.py packages/<name> --html ~/Downloads/index.cleaned.html --
 ```
 This replaces `index.html` (the old one is kept as `index.original.html`, never zipped), deletes screenshots nothing references any more and rewrites the zip.
 
+## Comments
+Add your own remarks to the page, highlighted as yellow notes in the flow. Three ways:
+
+1. **During the demo, in Studio.** Teach the Studio agent a tiny "note" habit once per session by pasting this prompt:
+   ```text
+   Learn this rule for this conversation: whenever one of my messages starts with "note:", it is a comment for the
+   demo documentation, not a task. Do not call any tools and do not analyze anything. Reply with exactly one word: "Noted."
+   ```
+   Then type `note: this is where it picks the right chart` at any moment. The message lands in the session log, the build
+   shows it as a comment (the agent's "Noted." reply is hidden) and the screenshots around it stay attached.
+   (`comment:` and `/note` work too.) If Studio lets you save the rule as a reusable skill, use the same text.
+2. **In the page.** Hover a prompt and click **+ comment**, type, then **Edit -> Save cleaned HTML** and apply it as in
+   *Cleaning up* (`studio_prune.py --html ...`).
+3. **From Claude / the command line**, on an existing package:
+   ```bash
+   python3 studio_comment.py packages/<name> --list
+   python3 studio_comment.py packages/<name> --turn 3 --text "Agent picked the wrong measure" --author Claude --zip
+   ```
+   In Claude Code just say "add a comment to prompt 3 of the <name> package: ...".
+
 ## Files
 | File | Purpose |
 |---|---|
 | `snapshot_watchdog.py` | background capture (window shot + MCP export) |
 | `studio_replay.py` | builds the HTML package from session log + snapshots (+ video, narration) |
 | `studio_prune.py` | applies a cleaned page to the package |
+| `studio_comment.py` | adds a highlighted comment to a built package |
 | `studio_logs.py` | finds the Studio session log (`--log-dir` / `$STUDIO_LOG_DIR`, running `TableauAgent` process, folder names, content sniffing; honors `$CLAUDE_CONFIG_DIR`) |
 | `macperms.py` | Screen Recording check and window lookup (stdlib only) |
 | `run-tableau-desktop-mcp.sh`, `.mcp.json` | launch / register the bundled `tableau-desktop` MCP server |

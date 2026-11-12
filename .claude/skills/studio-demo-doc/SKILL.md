@@ -38,6 +38,10 @@ Read the background task output once (not repeatedly) and report the capture lin
 The user can open the page, click **Edit**, tick prompts/steps/chatter/shots, Delete selected, **Save cleaned HTML** (-> `~/Downloads/index.cleaned.html`).
 If the user says "apply the cleaned HTML": use the path they give, else `~/Downloads/index.cleaned.html` (if several `index.cleaned*.html` exist or the package is unclear, ask; default package = newest under `packages/`). Then: `python3 studio_prune.py packages/<name> --html ~/Downloads/index.cleaned.html --zip` (backs up `index.original.html`, drops unused assets, re-zips). Report removed files and the new zip.
 
+## comments
+- Comments typed in Studio as `note: ...` (also `comment:`, `/note`) are picked up automatically at build time and shown as yellow notes; the agent's reply to them is hidden. The Studio learn prompt is in README.md ("Comments"); give it to the user on request.
+- To add a comment to a built package ("add a comment to prompt 3 ..."): `python3 studio_comment.py packages/<name> --list` to find the prompt number, then `python3 studio_comment.py packages/<name> --turn N --text "<text>" --author Claude --zip`. Default package = newest under `packages/`.
+
 ## Notes
 - Captures: baseline, `progress` (every few seconds while the agent works), `sheet-change` (tab switch / new view, by agent or user; new non-active views are exported as extras), `user-change` (visible change while the agent is idle), `task-done`.
 - The HTML has a Both / Sheet / Studio window toggle (also key `t`); the choice is remembered.
