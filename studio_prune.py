@@ -8,7 +8,7 @@ Workflow: open packages/<name>/index.html -> Edit -> tick parts -> Delete select
 
 Without --html it only prunes assets that the current index.html no longer references.
 """
-import argparse, shutil
+import argparse, re, shutil
 from pathlib import Path
 
 
@@ -26,7 +26,7 @@ def main():
             raise SystemExit(f"not found: {src}")
         if not (pkg / "index.original.html").exists():
             shutil.copy(index, pkg / "index.original.html")
-        shutil.copy(src, index)
+        index.write_text(re.sub(r'<base id="savebase"[^>]*>', '', src.read_text()))   # drop the helper the page added so assets/ resolves relatively
     text = index.read_text()
     removed = freed = 0
     for f in sorted((pkg / "assets").glob("*")):

@@ -322,6 +322,7 @@ bar.del.addEventListener('click',()=>{const ps=[...document.querySelectorAll('.p
 bar.undo.addEventListener('click',()=>{(hist.pop()||[]).forEach(e=>e.classList.remove('del'));upd()});
 document.getElementById('save').addEventListener('click',()=>{const d=document.documentElement.cloneNode(true);
   d.querySelectorAll('.del,.sel').forEach(e=>e.remove());d.querySelectorAll('.picked,.on').forEach(e=>e.classList.remove('picked','on'));
+  if(!d.querySelector('base')){const b=document.createElement('base');b.id='savebase';b.href=location.href;d.querySelector('head').prepend(b)}   // keeps assets/ working when the file is opened from Downloads; studio_prune removes it
   d.querySelector('body').className='';const n=d.querySelectorAll('.turn').length,sp=d.querySelector('header span');
   if(sp)sp.textContent=n+' prompts \u00b7 replay of a Tableau Studio session';
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['<!doctype html>'+d.outerHTML],{type:'text/html'}));
@@ -446,7 +447,7 @@ def render(turns, title, video_name, whisper, video_start):
         data = [e for e in tools if DATA_TOOLS.search(e["name"]) and e.get("result")]
         says = [e for e in turn["events"] if e["kind"] == "say"]
         body = [f'<div class="thead"><span class="num">{n}</span><span class="ctx">{t0:%H:%M:%S} UTC &middot; sheet: '
-                f'{html.escape(turn["ctx"].get("active-sheet-name", "?"))}</span></div>',
+                f'{html.escape(html.unescape(turn["ctx"].get("active-sheet-name", "?")))}</span></div>',
                 f'<div class="msg user"><div class="lbl">You asked</div>{html.escape(turn["prompt"])}</div>']
         work = []
         if tools:
