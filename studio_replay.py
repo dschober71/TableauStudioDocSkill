@@ -414,6 +414,16 @@ TRIGGER_LABEL = {"task-done": "task done", "progress": "while working", "sheet-c
                  "user-change": "user action", "baseline": "before", "change": "workbook change"}
 
 
+def esc_name(t):
+    """Sheet names from logs/MCP may already be HTML-escaped (once or twice): decode fully, then escape once."""
+    for _ in range(3):
+        u = html.unescape(t)
+        if u == t:
+            break
+        t = u
+    return html.escape(t)
+
+
 def shot_html(s):
     if not (s["mcp"] or s["screen"]):
         return ""
@@ -421,7 +431,7 @@ def shot_html(s):
     imgs = "".join(f'<img class="{k}" loading="lazy" src="assets/{s[k]}">' for k in ("mcp", "screen") if s[k])
     trig = TRIGGER_LABEL.get(s["trigger"], s["trigger"] or "")
     cap = f'{s["ts"]:%H:%M:%S} UTC &middot; {html.escape(trig)}' + (f' &middot; {html.escape(s["detail"])}' if s.get("detail") else "") \
-        + (f' &middot; {html.escape(s["sheet"])}' if s["sheet"] else "")
+        + (f' &middot; {esc_name(s["sheet"])}' if s["sheet"] else "")
     extras = html.escape(json.dumps([{"n": x["name"], "i": x["img"]} for x in s.get("extras", [])]), quote=True)
     return (f'<div class="shot {html.escape(s["trigger"] or "")}" data-mcp="{s["mcp"] or ""}" data-screen="{s["screen"] or ""}" '
             f'data-extras="{extras}" data-cap="{html.escape(cap, quote=True)}"{t}>'
@@ -447,7 +457,7 @@ def render(turns, title, video_name, whisper, video_start):
         data = [e for e in tools if DATA_TOOLS.search(e["name"]) and e.get("result")]
         says = [e for e in turn["events"] if e["kind"] == "say"]
         body = [f'<div class="thead"><span class="num">{n}</span><span class="ctx">{t0:%H:%M:%S} UTC &middot; sheet: '
-                f'{html.escape(html.unescape(turn["ctx"].get("active-sheet-name", "?")))}</span></div>',
+                f'{esc_name(turn["ctx"].get("active-sheet-name", "?"))}</span></div>',
                 f'<div class="msg user"><div class="lbl">You asked</div>{html.escape(turn["prompt"])}</div>']
         work = []
         if tools:
